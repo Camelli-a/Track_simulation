@@ -5,7 +5,8 @@ const routes = [
     path: '/',
     component: () => import('@/layouts/DefaultLayout.vue'),
     children: [
-      { path: '',          redirect: '/power' },
+      { path: '',          redirect: '/dashboard' },
+      { path: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: 'OCC 调度中心' } },
       { path: 'power',     component: () => import('@/views/PowerView.vue'),   meta: { title: '供电仿真' } },
       { path: 'vehicle',   component: () => import('@/views/VehicleView.vue'), meta: { title: '车辆仿真' } },
       { path: 'track',     component: () => import('@/views/TrackView.vue'),   meta: { title: '轨道仿真' } },
