@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     UDP_PORT: int = 9000
 
     # ZMQ Broker 地址
+    zmq_address: str = "tcp://localhost:5555"
     ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"  # 订阅者连接
     ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"   # 发布者连接
 
