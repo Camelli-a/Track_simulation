@@ -64,3 +64,78 @@ DATA_SOURCE=zmq    # 切换为 ZMQ 真实设备
 ```
 
 UDP / ZMQ 接入点位于各 `app/services/*_service.py` 的 `elif self.source == "udp"` 分支中。
+
+---
+
+## ZMQ 通信总线
+
+系统内部使用 ZMQ 消息总线实现各子系统（供电/车辆/轨道/信号）之间的消息互联。
+
+### 消息格式
+
+所有消息遵循统一包装格式：
+
+```json
+{
+  "topic": "train_state",
+  "timestamp": 1720000000.123,
+  "data": { ...各模块自定义... }
+}
+```
+
+详细格式规范见 [docs/message-spec.md](docs/message-spec.md)
+
+### 启动 ZMQ Broker
+
+**必须先启动 Broker，才能进行消息通信：**
+
+```bash
+cd backend
+python -m app.communication.broker
+```
+
+### 启动 Mock 数据发布器（可选）
+
+用于测试，定时发送假数据：
+
+```bash
+python -m app.communication.mock_publisher
+```
+
+### 测试订阅
+
+验证消息流通：
+
+```bash
+python -m app.communication.test_subscriber
+```
+
+### 在代码中使用
+
+```python
+from app.communication.message_bus import MessageBus
+
+bus = MessageBus()
+bus.start()
+
+# 发布消息
+bus.publish("train_state", {"vehicle_id": "TRAIN-001", "speed": 80})
+
+# 订阅消息
+def on_train_state(topic, data):
+    print(f"收到: {data}")
+bus.subscribe("train_state", on_train_state)
+
+bus.stop()
+```
+
+### 支持的消息类型
+
+| topic | 说明 |
+|-------|------|
+| `train_state` | 车辆运动状态 |
+| `signal_state` | 信号灯/区段/道岔状态 |
+| `ma_state` | 移动授权边界 |
+| `power_state` | 供电系统状态 |
+| `comm_state` | 通信连接状态 |
+| `alarm_event` | 告警事件 |
