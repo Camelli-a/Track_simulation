@@ -81,13 +81,17 @@ function deriveParkingPhase(v) {
 function normalizeSection(s) {
   const segmentId = s.section_id ?? s.segment_id
   const occupied = Boolean(s.occupied)
+  const aspect = s.aspect
+    ?? (s.condition === 'warning' ? 'yellow' : null)
+    ?? (s.condition === 'fault' ? 'red' : null)
+    ?? (occupied ? 'red' : 'green')
   return {
     section_id: segmentId,
     segment_id: segmentId,
     start: s.start ?? 0,
     end: s.end ?? 0,
     occupied,
-    aspect: s.aspect ?? (occupied ? 'red' : 'green'),
+    aspect,
     condition: s.condition ?? 'normal',
     occupied_by: s.vehicle_id ?? s.occupied_by ?? null,
   }

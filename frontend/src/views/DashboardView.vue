@@ -121,7 +121,15 @@
       <StatusCard label="牵引功率" :value="store.power?.power ?? '--'" unit="kW" />
     </div>
 
-    <AlarmList :alarms="store.alarms" />
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <AlarmList :alarms="store.alarms" />
+      <EventTimeline
+        :events="store.eventTimeline"
+        :selected-vehicle-id="store.selectedVehicleId"
+        :color="store.vehicleColor"
+        @select="store.selectVehicle"
+      />
+    </div>
 
     <!-- 趋势图表 -->
     <div class="rounded-2xl bg-gray-900 border border-gray-800 p-4">
@@ -178,6 +186,7 @@ import PositionChart from '@/components/PositionChart.vue'
 import OccupancyTimeline from '@/components/OccupancyTimeline.vue'
 import StatusCard from '@/components/StatusCard.vue'
 import AlarmList from '@/components/AlarmList.vue'
+import EventTimeline from '@/components/EventTimeline.vue'
 
 const store = useSimulationStore()
 const sandboxMode = ref('occ')
