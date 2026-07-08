@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getSignalStatus, getSignalLights } from '@/api/signal'
+import { normalizeSignalStatus, normalizeSignalLight } from '@/adapters/signalApi'
 
 export const useSignalStore = defineStore('signal', () => {
   const status  = ref(null)
@@ -9,12 +10,15 @@ export const useSignalStore = defineStore('signal', () => {
 
   async function fetchStatus() {
     loading.value = true
-    try { status.value = await getSignalStatus() }
+    try {
+      status.value = normalizeSignalStatus(await getSignalStatus())
+    }
     finally { loading.value = false }
   }
 
   async function fetchLights() {
-    lights.value = await getSignalLights()
+    const raw = await getSignalLights()
+    lights.value = (raw ?? []).map(normalizeSignalLight)
   }
 
   return { status, lights, loading, fetchStatus, fetchLights }
