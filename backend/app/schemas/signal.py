@@ -42,13 +42,26 @@ class MovementAuthorityLimit(BaseModel):
     position: float
     route_id: str
     ma_limit: float
+    distance_to_ma: float
     permission: str
     signal_state: str
     speed_limit: float
     target_speed: float
     reason: str
     front_vehicle_id: Optional[str] = None
+    front_train_length: Optional[float] = None
+    location_uncertainty: float
+    communication_margin: float
+    safety_margin: float
+    front_protection_point: Optional[float] = None
     safe_distance: float
+    current_speed: float
+    route_speed_limit: float
+    required_stop_distance: float
+    emergency_stop_distance: float
+    warning_distance: float
+    braking_curve_speed_limit: float
+    braking_model: str
 
 
 class RouteResult(BaseModel):
@@ -67,6 +80,7 @@ class TrainStateInput(BaseModel):
     position: float
     speed: float
     route_id: str
+    train_length: Optional[float] = None
 
 
 class RouteRequestInput(BaseModel):
