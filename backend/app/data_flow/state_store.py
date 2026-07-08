@@ -190,6 +190,26 @@ class DashboardStateStore:
                 payload.setdefault("condition", "normal")
                 self._sections[section_id] = TrackSectionSnapshot(**payload)
 
+    def get_track_info_payload(self) -> Dict[str, Any]:
+        with self._lock:
+            sections = []
+            for section in sorted(self._sections.values(), key=lambda item: item.section_id):
+                sections.append(
+                    {
+                        "section_id": section.section_id,
+                        "start": section.start,
+                        "end": section.end,
+                        "gradient": section.gradient if section.gradient is not None else 0.0,
+                        "speed_limit": section.speed_limit if section.speed_limit is not None else 60.0,
+                        "station_id": section.station_id,
+                        "stop_position": section.stop_position,
+                    }
+                )
+            return {
+                "line_id": sections and next(iter(self._sections.values())).line_id or "LINE-1",
+                "sections": sections,
+            }
+
     def update_power(self, data: Dict[str, Any]) -> None:
         now = time.time()
         raw_data = dict(data)

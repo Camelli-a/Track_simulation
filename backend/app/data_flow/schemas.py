@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-DataSource = Literal["mock", "udp", "zmq", "unknown"]
+DataSource = Literal["mock", "udp", "zmq", "frontend", "unknown"]
 SystemState = Literal["running", "degraded", "emergency", "offline"]
 TrainMode = Literal["manual", "ato", "atp", "emergency", "unknown"]
 SignalLightState = Literal["red", "yellow", "green", "unknown"]
