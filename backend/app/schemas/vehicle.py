@@ -16,7 +16,9 @@ class VehicleStatus(BaseModel):
 class VehicleControlRequest(BaseModel):
     vehicle_id: str = Field(default="TRAIN-001")
     line_id: str = Field(default="LINE-1")
-    command: Literal["manual", "traction", "brake", "emergency_stop", "ato"] = "manual"
+    command: Literal["manual", "traction", "brake", "emergency_stop", "emergency_brake", "ato"] = "manual"
+    level: int = Field(default=1, ge=0, le=4)
+    source: str = "frontend"
     traction_level: int = Field(default=0, ge=0, le=4)
     brake_level: int = Field(default=0, ge=0, le=4)
     direction: Literal["forward", "backward", "neutral"] = "forward"

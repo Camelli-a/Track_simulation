@@ -58,11 +58,12 @@ def _build_vehicle_control_message(command: VehicleControlRequest) -> tuple[str,
     emergency_button = False
 
     if command.command == "traction":
+        traction_level = max(traction_level, command.level)
         brake_level = 0
     elif command.command == "brake":
         traction_level = 0
-        brake_level = max(brake_level, 2)
-    elif command.command == "emergency_stop":
+        brake_level = max(brake_level, command.level, 2)
+    elif command.command in {"emergency_stop", "emergency_brake"}:
         traction_level = 0
         brake_level = 4
         emergency_button = True
@@ -71,6 +72,7 @@ def _build_vehicle_control_message(command: VehicleControlRequest) -> tuple[str,
         "vehicle_id": command.vehicle_id,
         "line_id": command.line_id,
         "source": "frontend",
+        "command_source": command.source,
         "control_mode": "manual",
         "traction_level": traction_level,
         "brake_level": brake_level,
