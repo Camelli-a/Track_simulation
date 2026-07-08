@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     UDP_PORT: int = 9000
 
     # ZMQ
-    ZMQ_ADDRESS: str = "tcp://localhost:5555"
+    ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
+    ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"
+    ZMQ_ADDRESS: str = "tcp://127.0.0.1:5555"
 
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 
