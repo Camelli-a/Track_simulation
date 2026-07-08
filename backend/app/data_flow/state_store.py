@@ -15,6 +15,11 @@ from app.data_flow.data_mapper import (
     normalize_switch,
     normalize_train,
 )
+from app.data_flow.display_text import (
+    alarm_level_label,
+    alarm_source_label,
+    translate_alarm_message,
+)
 from app.data_flow.schemas import (
     AtoCommandSnapshot,
     AlarmEvent,
@@ -248,10 +253,14 @@ class DashboardStateStore:
     def add_alarm(self, data: Dict[str, Any]) -> None:
         now = time.time()
         payload = dict(data)
+        raw_data = dict(data)
         payload.setdefault("alarm_id", f"ALM-{int(now * 1000)}")
         payload.setdefault("timestamp", now)
         payload.setdefault("message", "Unknown alarm")
-        payload.setdefault("raw_data", dict(data))
+        payload["message"] = translate_alarm_message(payload.get("message"))
+        payload["level_label"] = alarm_level_label(payload.get("level"))
+        payload["source_label"] = alarm_source_label(payload.get("source"))
+        payload.setdefault("raw_data", raw_data)
         with self._lock:
             self._alarms.append(AlarmEvent(**payload))
             self._alarms = self._alarms[-100:]
