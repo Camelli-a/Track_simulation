@@ -6,7 +6,6 @@ import logging
 from typing import Any, Dict
 
 import zmq
-import zmq.asyncio
 
 from app.core.config import settings
 from app.data_flow.schemas import IncomingMessage
@@ -68,15 +67,19 @@ class ZmqDashboardListener:
                 pass
 
     async def _run(self) -> None:
-        context = zmq.asyncio.Context.instance()
+        context = zmq.Context.instance()
         socket = context.socket(zmq.SUB)
         socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        socket.setsockopt(zmq.RCVTIMEO, 500)
         socket.connect(self.address)
         state_store.update_comm({"zmq_connected": True, "source": "zmq"})
         logger.info("ZMQ dashboard listener connected to %s", self.address)
         try:
             while self._running:
-                raw = await socket.recv()
+                try:
+                    raw = await asyncio.to_thread(socket.recv)
+                except zmq.Again:
+                    continue
                 self.handle_raw_message(raw)
         except asyncio.CancelledError:
             raise

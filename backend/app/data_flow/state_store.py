@@ -32,6 +32,25 @@ from app.data_flow.schemas import (
 )
 
 
+MA_TO_TRAIN_FIELDS = (
+    "route_id",
+    "ma_limit",
+    "distance_to_ma",
+    "permission",
+    "signal_state",
+    "speed_limit",
+    "target_speed",
+    "route_speed_limit",
+    "required_stop_distance",
+    "emergency_stop_distance",
+    "warning_distance",
+    "braking_curve_speed_limit",
+    "braking_model",
+    "front_vehicle_id",
+    "front_protection_point",
+)
+
+
 class DashboardStateStore:
     """In-memory state cache for the current dashboard snapshot."""
 
@@ -100,12 +119,12 @@ class DashboardStateStore:
                 normalized = payload
             ma_snapshot = self._ma_limits.get(normalized["vehicle_id"])
             if ma_snapshot:
-                normalized["ma_limit"] = ma_snapshot.ma_limit
-                normalized["route_id"] = ma_snapshot.route_id
-                normalized["permission"] = ma_snapshot.permission
-                normalized["signal_state"] = ma_snapshot.signal_state
-                normalized["speed_limit"] = ma_snapshot.speed_limit
-                normalized["target_speed"] = ma_snapshot.target_speed
+                ma_payload = ma_snapshot.model_dump()
+                for field in MA_TO_TRAIN_FIELDS:
+                    if ma_payload.get(field) is not None:
+                        normalized[field] = ma_payload[field]
+                if normalized.get("stop_distance") is None and ma_payload.get("distance_to_ma") is not None:
+                    normalized["stop_distance"] = max(0.0, float(ma_payload["distance_to_ma"]))
             self._trains[normalized["vehicle_id"]] = TrainSnapshot(**normalized)
 
     def update_ma_limits(self, ma_limits: Iterable[Dict[str, Any]]) -> None:
@@ -118,6 +137,11 @@ class DashboardStateStore:
                 if not vehicle_id:
                     continue
                 normalized_ma.setdefault("route_id", "R_MAIN")
+                if normalized_ma.get("distance_to_ma") is None and normalized_ma.get("position") is not None:
+                    normalized_ma["distance_to_ma"] = max(
+                        0.0,
+                        float(normalized_ma["ma_limit"]) - float(normalized_ma["position"]),
+                    )
                 normalized_ma.setdefault("updated_at", now)
                 normalized_ma.setdefault("raw_data", raw_data)
                 ma_snapshot = MovementAuthoritySnapshot(**normalized_ma)
@@ -125,12 +149,12 @@ class DashboardStateStore:
                 train = self._trains.get(vehicle_id)
                 if train:
                     payload = train.model_dump()
-                    payload["ma_limit"] = ma_snapshot.ma_limit
-                    payload["route_id"] = ma_snapshot.route_id
-                    payload["permission"] = ma_snapshot.permission
-                    payload["signal_state"] = ma_snapshot.signal_state
-                    payload["speed_limit"] = ma_snapshot.speed_limit
-                    payload["target_speed"] = ma_snapshot.target_speed
+                    ma_payload = ma_snapshot.model_dump()
+                    for field in MA_TO_TRAIN_FIELDS:
+                        if ma_payload.get(field) is not None:
+                            payload[field] = ma_payload[field]
+                    if ma_payload.get("distance_to_ma") is not None:
+                        payload["stop_distance"] = max(0.0, float(ma_payload["distance_to_ma"]))
                     self._trains[vehicle_id] = TrainSnapshot(**payload)
 
     def update_signal_state(self, data: Dict[str, Any]) -> None:

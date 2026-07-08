@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,6 +11,10 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.data_flow.websocket import router as dashboard_ws_router
 from app.data_flow.zmq_listener import zmq_dashboard_listener
+
+
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 @asynccontextmanager

@@ -67,6 +67,19 @@ MA_FIELD_MAPPING = {
     "targetVelocity": "target_speed",
     "frontTrainId": "front_vehicle_id",
     "safeDistance": "safe_distance",
+    "distanceToMa": "distance_to_ma",
+    "frontTrainLength": "front_train_length",
+    "locationUncertainty": "location_uncertainty",
+    "communicationMargin": "communication_margin",
+    "safetyMargin": "safety_margin",
+    "frontProtectionPoint": "front_protection_point",
+    "currentSpeed": "current_speed",
+    "routeSpeedLimit": "route_speed_limit",
+    "requiredStopDistance": "required_stop_distance",
+    "emergencyStopDistance": "emergency_stop_distance",
+    "warningDistance": "warning_distance",
+    "brakingCurveSpeedLimit": "braking_curve_speed_limit",
+    "brakingModel": "braking_model",
 }
 
 SECTION_FIELD_MAPPING = {

@@ -68,10 +68,19 @@ class TrainSnapshot(BaseModel):
     is_running: bool = True
     emergency_brake: bool = False
     ma_limit: Optional[float] = None
+    distance_to_ma: Optional[float] = None
     permission: MovementPermission = "unknown"
     signal_state: SignalLightState = "unknown"
     speed_limit: Optional[float] = None
     target_speed: Optional[float] = None
+    route_speed_limit: Optional[float] = None
+    required_stop_distance: Optional[float] = None
+    emergency_stop_distance: Optional[float] = None
+    warning_distance: Optional[float] = None
+    braking_curve_speed_limit: Optional[float] = None
+    braking_model: Optional[str] = None
+    front_vehicle_id: Optional[str] = None
+    front_protection_point: Optional[float] = None
     energy_kwh: Optional[float] = None
     stop_distance: Optional[float] = None
     station_name: Optional[str] = None
@@ -139,13 +148,26 @@ class MovementAuthoritySnapshot(BaseModel):
     position: Optional[float] = None
     route_id: str = "R_MAIN"
     ma_limit: float
+    distance_to_ma: Optional[float] = None
     permission: MovementPermission = "unknown"
     signal_state: SignalLightState = "unknown"
     speed_limit: Optional[float] = None
     target_speed: Optional[float] = None
     reason: Optional[str] = None
     front_vehicle_id: Optional[str] = None
+    front_train_length: Optional[float] = None
+    location_uncertainty: Optional[float] = None
+    communication_margin: Optional[float] = None
+    safety_margin: Optional[float] = None
+    front_protection_point: Optional[float] = None
     safe_distance: Optional[float] = None
+    current_speed: Optional[float] = None
+    route_speed_limit: Optional[float] = None
+    required_stop_distance: Optional[float] = None
+    emergency_stop_distance: Optional[float] = None
+    warning_distance: Optional[float] = None
+    braking_curve_speed_limit: Optional[float] = None
+    braking_model: Optional[str] = None
     updated_at: float
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
