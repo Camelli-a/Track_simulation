@@ -25,14 +25,18 @@ class Train:
         self.power_factor = 1.0
         self.comm_ok = True
         self.last_alarm = None
+        self.atp_triggered = False
+        self.current_traction_level = 0
+        self.current_brake_level = 0
+        self.fallback_ato = None
 
     def apply_ma_state(self, ma_limit: MaLimit):
         if ma_limit.vehicle_id == self.state.vehicle_id:
             self.ma_limit = ma_limit.ma_limit
 
     def apply_power_state(self, power: PowerState):
-        self.power_fault = power.is_fault
-        self.power_factor = 0.0 if power.is_fault else 1.0
+        self.power_fault = power.is_fault or power.voltage < 1000.0
+        self.power_factor = 0.0 if self.power_fault else 1.0
 
     def apply_comm_state(self, comm: CommState):
         self.comm_ok = comm.driver_console_connected and comm.zmq_connected
@@ -43,6 +47,8 @@ class Train:
 
         traction_level = driver_input.traction_level
         brake_level = driver_input.brake_level
+        self.current_traction_level = traction_level
+        self.current_brake_level = brake_level
 
         if driver_input.emergency_button:
             self.state.emergency_brake = True
@@ -58,11 +64,35 @@ class Train:
 
         traction_level = ato_command.traction_level
         brake_level = ato_command.brake_level
+        self.current_traction_level = traction_level
+        self.current_brake_level = brake_level
 
         if not self.state.emergency_brake:
             self.state.mode = "ato"
 
         self._step(traction_level, brake_level, dt)
+
+    def step_tick(self, dt: float):
+        traction_level = self.current_traction_level
+        brake_level = self.current_brake_level
+
+        if self.fallback_ato is not None and not self.state.emergency_brake:
+            traction_level, brake_level, _ = self.fallback_ato.compute(
+                position=self.state.position,
+                speed_kmh=self.state.speed_kmh,
+            )
+            self.state.mode = "ato"
+            self.current_traction_level = traction_level
+            self.current_brake_level = brake_level
+
+        self._step(traction_level, brake_level, dt)
+
+    def enable_fallback_ato(self, target_position: float):
+        from .controllers.fallback_ato import FallbackAtoController
+
+        self.fallback_ato = FallbackAtoController(target_position)
+        if not self.state.emergency_brake:
+            self.state.mode = "ato"
 
     def _step(self, traction_level: int, brake_level: int, dt: float):
         speed_limit = self.track.get_speed_limit(self.state.position)
@@ -75,9 +105,16 @@ class Train:
         )
 
         if should_brake:
+            was_emergency = self.state.emergency_brake
             self.state.emergency_brake = True
             self.state.mode = "emergency"
-            self.last_alarm = alarm
+            if not was_emergency and not self.atp_triggered:
+                self.last_alarm = alarm
+                self.atp_triggered = True
+            traction_level = 0
+            brake_level = 4
+            self.current_traction_level = traction_level
+            self.current_brake_level = brake_level
 
         gradient = self.track.get_gradient(self.state.position)
 

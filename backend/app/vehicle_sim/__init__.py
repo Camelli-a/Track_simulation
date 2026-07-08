@@ -10,6 +10,7 @@ from .models import (
 )
 from .track_map import TrackMap
 from .train import Train
+from .train_manager import TrainManager
 
 __all__ = [
     "AtoCommand",
@@ -20,6 +21,7 @@ __all__ = [
     "TrackMap",
     "TrackSection",
     "Train",
+    "TrainManager",
     "TrainState",
     "build_alarm",
     "check_atp",

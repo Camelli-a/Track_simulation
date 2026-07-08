@@ -29,7 +29,12 @@ def main():
     parser.add_argument("--dt", type=float, default=0.1)
     parser.add_argument("--sleep", action="store_true")
     parser.add_argument("--use-zmq", action="store_true")
-    parser.add_argument("--zmq-address", default="tcp://localhost:5555")
+    parser.add_argument(
+        "--zmq-pub-address",
+        "--zmq-address",
+        default=None,
+        help="Publisher address for the MessageBus broker backend.",
+    )
     args = parser.parse_args()
 
     track = TrackMap(DEFAULT_TRACK)
@@ -40,7 +45,7 @@ def main():
     ]
 
     publisher: Optional[ZmqPublisher] = (
-        ZmqPublisher(args.zmq_address) if args.use_zmq else None
+        ZmqPublisher(args.zmq_pub_address) if args.use_zmq else None
     )
 
     try:
