@@ -18,7 +18,19 @@ logger = logging.getLogger(__name__)
 class ZmqDashboardListener:
     """Background ZMQ subscriber for real module data.
 
-    Preferred protocol v1 input:
+    Supported inputs:
+
+    Communication MessageBus frame:
+    train_state {"topic": "train_state", "timestamp": 1720000000.123, "data": {...}}
+
+    Wrapped JSON:
+    {
+      "topic": "train_state",
+      "timestamp": 1720000000.123,
+      "data": {...}
+    }
+
+    Legacy flat JSON:
     {
       "type": "train_state",
       "timestamp": 1720000000.123,
@@ -32,7 +44,11 @@ class ZmqDashboardListener:
     """
 
     def __init__(self, address: str | None = None) -> None:
-        self.address = address or settings.ZMQ_ADDRESS
+        self.address = address or getattr(
+            settings,
+            "ZMQ_BROKER_FRONTEND",
+            settings.ZMQ_ADDRESS,
+        )
         self._task: asyncio.Task | None = None
         self._running = False
 
@@ -72,8 +88,8 @@ class ZmqDashboardListener:
 
     def handle_raw_message(self, raw: bytes) -> None:
         try:
-            payload = json.loads(raw.decode("utf-8"))
-            message_type = payload.get("type")
+            frame_topic, payload = self._parse_raw_payload(raw)
+            message_type = payload.get("topic") or payload.get("type") or frame_topic
             if not message_type:
                 raise ValueError("missing message type")
             message = IncomingMessage(
@@ -88,6 +104,22 @@ class ZmqDashboardListener:
         self.dispatch(message.type, message.data)
 
     @staticmethod
+    def _parse_raw_payload(raw: bytes) -> tuple[str | None, Dict[str, Any]]:
+        text = raw.decode("utf-8").strip()
+        try:
+            return None, json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        topic, separator, payload_text = text.partition(" ")
+        if not separator:
+            raise ValueError("message is neither JSON nor '<topic> <json>' frame")
+        payload = json.loads(payload_text)
+        if not isinstance(payload, dict):
+            raise ValueError("message payload must be a JSON object")
+        return topic or None, payload
+
+    @staticmethod
     def _extract_data(payload: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(payload.get("data"), dict):
             data = dict(payload["data"])
@@ -95,7 +127,8 @@ class ZmqDashboardListener:
             data = {
                 key: value
                 for key, value in payload.items()
-                if key not in {"type", "timestamp", "source", "version", "protocol_version"}
+                if key
+                not in {"topic", "type", "timestamp", "source", "version", "protocol_version"}
             }
         if "timestamp" in payload and "timestamp" not in data:
             data["timestamp"] = payload["timestamp"]
@@ -112,10 +145,19 @@ class ZmqDashboardListener:
             vehicle_id = data.get("vehicle_id") or data.get("train_id") or data.get("id")
             if vehicle_id:
                 state_store.update_driver_input(vehicle_id, data)
+        elif message_type == "ato_command":
+            vehicle_id = data.get("vehicle_id") or data.get("train_id") or data.get("id")
+            if vehicle_id:
+                state_store.update_ato_command(vehicle_id, data)
         elif message_type == "signal_state":
             state_store.update_signal_state(data)
         elif message_type == "ma_state":
-            state_store.update_ma_limits(data.get("ma_limits", []))
+            ma_limits = data.get("ma_limits")
+            if ma_limits is None and data.get("vehicle_id"):
+                ma_limits = [data]
+            state_store.update_ma_limits(ma_limits or [])
+        elif message_type == "track_info":
+            state_store.update_track_info(data)
         elif message_type == "power_state":
             state_store.update_power(data)
         elif message_type == "comm_state":

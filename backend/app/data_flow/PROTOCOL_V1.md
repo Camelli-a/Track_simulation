@@ -30,6 +30,7 @@ Backend student C:
 Frontend student D:
 - `dashboard_snapshot`
 - `trains`, `driver_inputs`, `sections`, `signals`, `switches`, `power`, `communication`, `alarms`
+- `GET /data/line-layout.json`
 
 ## Basic Rules
 
@@ -41,6 +42,9 @@ Frontend student D:
   - `position`, `start`, `end`, `ma_limit`: meters
   - `speed`, `target_speed`: km/h
   - `acceleration`: m/s^2
+  - `energy_kwh`: kWh
+  - `stop_distance`: meters
+  - `stop_error_cm`: centimeters
   - `voltage`: V
   - `current`: A
   - `power`: kW
@@ -133,7 +137,13 @@ Sent by vehicle algorithm student A.
   "acceleration": 0.32,
   "mode": "ato",
   "is_running": true,
-  "emergency_brake": false
+  "emergency_brake": false,
+  "energy_kwh": 52.5,
+  "stop_distance": 120.0,
+  "station_name": "中心站",
+  "parking_phase": "approaching",
+  "stop_error_cm": 45.0,
+  "platform_id": "PF-01"
 }
 ```
 
@@ -143,6 +153,13 @@ Allowed `mode` values:
 - `atp`
 - `emergency`
 - `unknown`
+
+Allowed `parking_phase` values:
+- `cruising`
+- `approaching`
+- `braking`
+- `docking`
+- `stopped`
 
 ## signal_state
 
@@ -157,10 +174,13 @@ Sent by signal / ATO algorithm student B.
   "sections": [
     {
       "section_id": "SEG-01",
+      "track_seg_id": "T01",
       "start": 0,
       "end": 500,
       "occupied": true,
       "vehicle_id": "TRAIN-001",
+      "occupied_by": "TRAIN-001",
+      "aspect": "red",
       "condition": "normal"
     }
   ],
@@ -168,13 +188,17 @@ Sent by signal / ATO algorithm student B.
     {
       "signal_id": "SIG-01",
       "position": 500,
-      "state": "green"
+      "state": "green",
+      "signal_type": "区间"
     }
   ],
   "switches": [
     {
       "switch_id": "SW-01",
       "position": "normal",
+      "turnout_id": "SW-01",
+      "routing": "normal",
+      "state": "normal",
       "locked": true,
       "related_section": "SEG-03"
     }
@@ -186,6 +210,8 @@ Allowed values:
 - signal `state`: `red`, `yellow`, `green`, `unknown`
 - section `condition`: `normal`, `warning`, `fault`
 - switch `position`: `normal`, `reverse`, `unknown`
+
+`sections.aspect` should be `red`, `yellow`, `green`, or `unknown`; if omitted, the backend derives `red` from `occupied=true` and `green` otherwise.
 
 ## ma_state
 
@@ -199,7 +225,11 @@ Sent by signal / ATO algorithm student B.
   "ma_limits": [
     {
       "vehicle_id": "TRAIN-001",
+      "route_id": "R_MAIN",
       "ma_limit": 1600,
+      "permission": "allow",
+      "signal_state": "green",
+      "speed_limit": 60,
       "target_speed": 60,
       "reason": "front_train"
     }
@@ -255,6 +285,12 @@ REST:
 GET /api/v1/dashboard/snapshot
 ```
 
+Static line layout:
+
+```text
+GET /data/line-layout.json
+```
+
 WebSocket:
 
 ```text
@@ -270,6 +306,7 @@ Output shape:
   "timestamp": 1720000000.123,
   "system": {
     "status": "running",
+    "system_mode": "normal",
     "data_source": "mock",
     "zmq_connected": false,
     "websocket_clients": 1
@@ -284,4 +321,3 @@ Output shape:
   "alarms": []
 }
 ```
-
