@@ -57,7 +57,10 @@ def test_start_subscribes_train_state_and_starts_publish_thread():
     adapter.start()
 
     assert fake_bus.started is True
-    assert fake_bus.subscriptions[0][0] == "train_state"
+    assert [topic for topic, _ in fake_bus.subscriptions] == [
+        "train_state",
+        "route_request",
+    ]
     assert adapter.publish_thread is not None
     assert adapter.publish_thread.is_alive()
 
@@ -169,6 +172,276 @@ def test_message_data_has_no_double_wrapping_fields():
     adapter.train_last_update_at["TRAIN-001"] = 98.0
 
     adapter.publish_signal_outputs(now=100.0)
+
+    signal_data = _published_data(fake_bus, "signal_state")[0]
+    ma_data = _published_data(fake_bus, "ma_state")[0]
+    alarm_data = _published_data(fake_bus, "alarm_event")[0]
+
+    assert "type" not in signal_data
+    assert "timestamp" not in signal_data
+    assert "type" not in ma_data
+    assert "timestamp" not in ma_data
+    assert "type" not in alarm_data
+    assert "occurred_at" in alarm_data
+
+
+def test_on_route_request_open_adds_request():
+    fake_bus = FakeBus()
+    clock = FakeClock(100.0)
+    adapter = SignalZmqAdapter(
+        bus=fake_bus,
+        publish_on_update=False,
+        time_func=clock.time,
+    )
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+        },
+    )
+
+    assert len(adapter.route_requests) == 1
+    request = adapter.route_requests[0]
+    assert request["request_id"] == "REQ-TRAIN-003-R_BRANCH"
+    assert request["vehicle_id"] == "TRAIN-003"
+    assert request["route_id"] == "R_BRANCH"
+    assert request["request_type"] == "open"
+    assert request["priority"] == 0
+    assert request["last_update_at"] == 100.0
+
+
+def test_on_route_request_open_updates_duplicate_request():
+    fake_bus = FakeBus()
+    clock = FakeClock(100.0)
+    adapter = SignalZmqAdapter(
+        bus=fake_bus,
+        publish_on_update=False,
+        time_func=clock.time,
+    )
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "request_id": "REQ-001",
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+            "priority": 0,
+        },
+    )
+    clock.now = 101.0
+    adapter.on_route_request(
+        "route_request",
+        {
+            "request_id": "REQ-002",
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+            "priority": 5,
+        },
+    )
+
+    assert len(adapter.route_requests) == 1
+    assert adapter.route_requests[0]["request_id"] == "REQ-002"
+    assert adapter.route_requests[0]["priority"] == 5
+    assert adapter.route_requests[0]["last_update_at"] == 101.0
+
+
+def test_on_route_request_cancel_specific_route():
+    adapter = SignalZmqAdapter(bus=FakeBus(), publish_on_update=False)
+    adapter.route_requests = [
+        {"vehicle_id": "TRAIN-003", "route_id": "R_MAIN"},
+        {"vehicle_id": "TRAIN-003", "route_id": "R_BRANCH"},
+        {"vehicle_id": "TRAIN-004", "route_id": "R_BRANCH"},
+    ]
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+            "request_type": "cancel",
+        },
+    )
+
+    assert adapter.route_requests == [
+        {"vehicle_id": "TRAIN-003", "route_id": "R_MAIN"},
+        {"vehicle_id": "TRAIN-004", "route_id": "R_BRANCH"},
+    ]
+
+
+def test_on_route_request_cancel_vehicle_all_routes():
+    adapter = SignalZmqAdapter(bus=FakeBus(), publish_on_update=False)
+    adapter.route_requests = [
+        {"vehicle_id": "TRAIN-003", "route_id": "R_MAIN"},
+        {"vehicle_id": "TRAIN-003", "route_id": "R_BRANCH"},
+        {"vehicle_id": "TRAIN-004", "route_id": "R_BRANCH"},
+    ]
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "request_type": "cancel",
+        },
+    )
+
+    assert adapter.route_requests == [
+        {"vehicle_id": "TRAIN-004", "route_id": "R_BRANCH"},
+    ]
+
+
+def test_on_route_request_clear_all():
+    adapter = SignalZmqAdapter(bus=FakeBus(), publish_on_update=False)
+    adapter.route_requests = [
+        {"vehicle_id": "TRAIN-003", "route_id": "R_MAIN"},
+        {"vehicle_id": "TRAIN-004", "route_id": "R_BRANCH"},
+    ]
+
+    adapter.on_route_request("route_request", {"request_type": "clear"})
+
+    assert adapter.route_requests == []
+
+
+def test_on_route_request_invalid_missing_route_id_publishes_alarm():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "request_type": "open",
+        },
+    )
+
+    assert adapter.route_requests == []
+    alarm = _published_data(fake_bus, "alarm_event")[0]
+    assert alarm["level"] == "warning"
+    assert alarm["category"] == "route_request"
+    assert alarm["details"]["reason"] == "missing_route_id"
+    assert "type" not in alarm
+
+
+def test_on_route_request_invalid_unsupported_type_publishes_alarm():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+            "request_type": "bad_type",
+        },
+    )
+
+    assert adapter.route_requests == []
+    alarm = _published_data(fake_bus, "alarm_event")[0]
+    assert alarm["details"]["reason"] == "unsupported_request_type"
+    assert alarm["details"]["request_type"] == "bad_type"
+
+
+def test_route_request_triggers_immediate_publish_when_enabled():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+    adapter.train_states_by_id["TRAIN-003"] = {
+        "vehicle_id": "TRAIN-003",
+        "position": 2435.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-003"] = 100.0
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+        },
+    )
+
+    assert "signal_state" in [topic for topic, _ in fake_bus.published]
+    assert "ma_state" in [topic for topic, _ in fake_bus.published]
+
+
+def test_route_request_participates_in_snapshot_route_results():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+    adapter.train_states_by_id["TRAIN-003"] = {
+        "vehicle_id": "TRAIN-003",
+        "position": 2435.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-003"] = 100.0
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+        },
+    )
+
+    route_results = _published_data(fake_bus, "signal_state")[-1]["route_results"]
+    assert route_results[0]["vehicle_id"] == "TRAIN-003"
+    assert route_results[0]["route_id"] == "R_BRANCH"
+    assert route_results[0]["reason"] == "switch_locked_conflict"
+
+
+def test_route_request_does_not_break_timeout_fail_safe():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
+    adapter.train_states_by_id["TRAIN-003"] = {
+        "vehicle_id": "TRAIN-003",
+        "position": 2435.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-003"] = 98.0
+    adapter.route_requests = [
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+            "request_type": "open",
+        }
+    ]
+
+    adapter.publish_signal_outputs(now=100.0)
+
+    ma_limit = _published_data(fake_bus, "ma_state")[0]["ma_limits"][0]
+    route_results = _published_data(fake_bus, "signal_state")[0]["route_results"]
+    assert ma_limit["permission"] == "stop"
+    assert ma_limit["reason"] == "train_state_timeout"
+    assert route_results[0]["reason"] == "switch_locked_conflict"
+
+
+def test_message_data_has_no_double_wrapping_after_route_request():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+    adapter.train_states_by_id["TRAIN-003"] = {
+        "vehicle_id": "TRAIN-003",
+        "position": 2435.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-003"] = 100.0
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "route_id": "R_BRANCH",
+        },
+    )
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-003",
+            "request_type": "open",
+        },
+    )
 
     signal_data = _published_data(fake_bus, "signal_state")[0]
     ma_data = _published_data(fake_bus, "ma_state")[0]

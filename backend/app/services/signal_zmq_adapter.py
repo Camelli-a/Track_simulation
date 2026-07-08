@@ -36,6 +36,7 @@ class SignalZmqAdapter:
     def start(self):
         self.bus.start()
         self.bus.subscribe("train_state", self.on_train_state)
+        self.bus.subscribe("route_request", self.on_route_request)
         self.stop_event.clear()
         if self.publish_thread is None or not self.publish_thread.is_alive():
             self.publish_thread = threading.Thread(
@@ -71,6 +72,27 @@ class SignalZmqAdapter:
         if self.publish_on_update:
             self.publish_signal_outputs()
 
+    def on_route_request(self, topic: str, data: dict) -> None:
+        request_type = str(data.get("request_type", "open")).strip().lower()
+        should_publish = False
+
+        if request_type == "open":
+            should_publish = self._open_route_request(data)
+        elif request_type == "cancel":
+            should_publish = self._cancel_route_request(data)
+        elif request_type == "clear":
+            with self.lock:
+                self.route_requests.clear()
+            should_publish = True
+        else:
+            self._publish_invalid_route_request_alarm(
+                data,
+                "unsupported_request_type",
+            )
+
+        if should_publish and self.publish_on_update:
+            self.publish_signal_outputs()
+
     def publish_signal_outputs(self, now=None):
         if now is None:
             now = self.time_func()
@@ -101,6 +123,62 @@ class SignalZmqAdapter:
                 "ma_limits": snapshot["ma_limits"],
             },
         )
+
+    def _open_route_request(self, data: dict) -> bool:
+        vehicle_id = data.get("vehicle_id")
+        route_id = data.get("route_id")
+        if not vehicle_id:
+            self._publish_invalid_route_request_alarm(data, "missing_vehicle_id")
+            return False
+        if not route_id:
+            self._publish_invalid_route_request_alarm(data, "missing_route_id")
+            return False
+
+        request = {
+            "request_id": data.get("request_id") or f"REQ-{vehicle_id}-{route_id}",
+            "vehicle_id": vehicle_id,
+            "route_id": route_id,
+            "request_type": "open",
+            "priority": data.get("priority", 0),
+            "last_update_at": self.time_func(),
+        }
+
+        with self.lock:
+            for index, existing_request in enumerate(self.route_requests):
+                if (
+                    existing_request.get("vehicle_id") == vehicle_id
+                    and existing_request.get("route_id") == route_id
+                ):
+                    self.route_requests[index] = request
+                    break
+            else:
+                self.route_requests.append(request)
+        return True
+
+    def _cancel_route_request(self, data: dict) -> bool:
+        vehicle_id = data.get("vehicle_id")
+        route_id = data.get("route_id")
+        if not vehicle_id:
+            self._publish_invalid_route_request_alarm(data, "missing_vehicle_id")
+            return False
+
+        with self.lock:
+            if route_id:
+                self.route_requests = [
+                    request
+                    for request in self.route_requests
+                    if not (
+                        request.get("vehicle_id") == vehicle_id
+                        and request.get("route_id") == route_id
+                    )
+                ]
+            else:
+                self.route_requests = [
+                    request
+                    for request in self.route_requests
+                    if request.get("vehicle_id") != vehicle_id
+                ]
+        return True
 
     def _publish_loop(self):
         while not self.stop_event.wait(self.publish_interval_seconds):
@@ -162,6 +240,26 @@ class SignalZmqAdapter:
                 "details": {
                     "stale_duration": round(stale_duration, 3),
                     "timeout_seconds": self.stale_timeout_seconds,
+                },
+            },
+        )
+
+    def _publish_invalid_route_request_alarm(self, data: dict, reason: str) -> None:
+        self.bus.publish(
+            "alarm_event",
+            {
+                "alarm_id": "SIGNAL-INVALID-ROUTE-REQUEST",
+                "source": "SIGNAL",
+                "level": "warning",
+                "category": "route_request",
+                "vehicle_id": data.get("vehicle_id"),
+                "message": "Invalid route_request message",
+                "occurred_at": self.time_func(),
+                "details": {
+                    "reason": reason,
+                    "request_type": data.get("request_type", "open"),
+                    "route_id": data.get("route_id"),
+                    "request_id": data.get("request_id"),
                 },
             },
         )
