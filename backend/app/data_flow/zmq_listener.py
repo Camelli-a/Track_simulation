@@ -13,6 +13,8 @@ from app.data_flow.state_store import state_store
 
 logger = logging.getLogger(__name__)
 
+MANAGEMENT_TOPICS = {"add_train", "remove_train", "clear_trains", "reset_trains"}
+
 
 class ZmqDashboardListener:
     """Background ZMQ subscriber for real module data.
@@ -72,8 +74,8 @@ class ZmqDashboardListener:
         socket.setsockopt_string(zmq.SUBSCRIBE, "")
         socket.setsockopt(zmq.RCVTIMEO, 500)
         socket.connect(self.address)
-        state_store.update_comm({"zmq_connected": True, "source": "zmq"})
-        logger.info("ZMQ dashboard listener connected to %s", self.address)
+        state_store.update_comm({"zmq_connected": False, "source": "zmq"})
+        logger.info("ZMQ dashboard listener subscribed to %s", self.address)
         try:
             while self._running:
                 try:
@@ -104,7 +106,12 @@ class ZmqDashboardListener:
         except Exception:
             logger.warning("Invalid ZMQ message: %r", raw)
             return
-        self.dispatch(message.type, message.data)
+        try:
+            self.dispatch(message.type, message.data)
+        except Exception:
+            logger.exception("Failed to dispatch ZMQ message type=%s data=%r", message.type, message.data)
+            return
+        state_store.mark_real_message_received("zmq")
 
     @staticmethod
     def _parse_raw_payload(raw: bytes) -> tuple[str | None, Dict[str, Any]]:
@@ -140,7 +147,9 @@ class ZmqDashboardListener:
         return data
 
     def dispatch(self, message_type: str, data: Dict[str, Any]) -> None:
-        if message_type == "train_state":
+        if message_type in MANAGEMENT_TOPICS:
+            logger.debug("Ignored management message type for dashboard: %s", message_type)
+        elif message_type == "train_state":
             vehicle_id = self._vehicle_id(data)
             if vehicle_id:
                 state_store.update_train(vehicle_id, data)
@@ -157,9 +166,17 @@ class ZmqDashboardListener:
             if vehicle_id:
                 state_store.update_driver_input(vehicle_id, data)
         elif message_type == "ato_command":
-            vehicle_id = self._vehicle_id(data)
-            if vehicle_id:
-                state_store.update_ato_command(vehicle_id, data)
+            commands = data.get("commands")
+            if isinstance(commands, list):
+                for item in commands:
+                    if isinstance(item, dict):
+                        vehicle_id = self._vehicle_id(item)
+                        if vehicle_id:
+                            state_store.update_ato_command(vehicle_id, item)
+            else:
+                vehicle_id = self._vehicle_id(data)
+                if vehicle_id:
+                    state_store.update_ato_command(vehicle_id, data)
         elif message_type == "signal_state":
             state_store.update_signal_state(data)
         elif message_type == "ma_state":
@@ -185,6 +202,14 @@ class ZmqDashboardListener:
                         state_store.update_route_result(item)
             else:
                 state_store.update_route_result(data)
+        elif message_type in {"command_ack", "vehicle_management_result", "train_registry"}:
+            if message_type == "train_registry":
+                vehicles = data.get("vehicles") or data.get("trains")
+                if isinstance(vehicles, list):
+                    for item in vehicles:
+                        if isinstance(item, dict):
+                            state_store.register_vehicle(item)
+            state_store.update_command_ack({**data, "topic": message_type})
         elif message_type == "power_state":
             state_store.update_power(data)
         elif message_type == "comm_state":
