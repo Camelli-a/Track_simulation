@@ -603,3 +603,27 @@ def test_timeout_fail_safe_makes_ato_degraded():
     assert command["ato_state"] == "degraded"
     assert command["target_speed"] == 0.0
     assert command["brake_level"] == 5
+
+
+def test_ato_command_strategy_fields_have_no_double_wrapping():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+
+    adapter.on_train_state(
+        "train_state",
+        {
+            "vehicle_id": "TRAIN-001",
+            "position": 900.0,
+            "speed": 20.0,
+            "route_id": "R_MAIN",
+        },
+    )
+
+    ato_data = _published_data(fake_bus, "ato_command")[0]
+    command = ato_data["commands"][0]
+    assert "type" not in ato_data
+    assert "timestamp" not in ato_data
+    assert "selected_strategy" in command
+    for strategy_score in command["strategy_scores"]:
+        assert "type" not in strategy_score
+        assert "timestamp" not in strategy_score

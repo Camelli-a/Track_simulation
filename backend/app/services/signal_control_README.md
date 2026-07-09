@@ -431,8 +431,12 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
       "traction_level": 0,
       "brake_level": 2,
       "holding_brake": false,
-      "selected_strategy": "pid_basic",
-      "score": null,
+      "selected_strategy": "comfort_brake",
+      "score": 0.82,
+      "strategy_scores": [
+        {"strategy": "conservative_brake", "target_speed": 13.8, "score": 0.76},
+        {"strategy": "comfort_brake", "target_speed": 16.5, "score": 0.82}
+      ],
       "reason": "stop_curve_braking"
     }
   ]
@@ -440,3 +444,22 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
 ```
 
 `target_speed` 始终不超过 `safe_speed_limit`。车辆模块后续订阅 `ato_command` 后自行执行动力学；本模块不替代车辆模型，也不做真实深度学习训练。
+
+### ATO AI 多目标评分模型
+
+当前 AI 优化是可解释的规则评分模型，不引入外部机器学习库，也不做深度学习训练。优化器在安全限速内生成候选策略并评分：
+
+- `conservative_brake`：更早制动，安全裕度更大。
+- `comfort_brake`：平滑制动，兼顾停车和舒适。
+- `energy_saving`：距离较远时减少牵引/制动切换。
+- `precise_stop`：接近停车点时更重视停车精度。
+
+评分目标包括：
+
+- 停车精度
+- 乘坐舒适度
+- 节能
+- 运行效率
+- 超速/MA 违规惩罚
+
+优化器只选择 `target_speed`、`selected_strategy`、`score` 和 `strategy_scores`；PIDController 仍负责根据目标速度输出牵引/制动级位。所有候选与最终 `target_speed` 都必须满足 `target_speed <= ma_state.speed_limit`。

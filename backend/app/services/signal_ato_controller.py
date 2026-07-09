@@ -74,6 +74,163 @@ def control_value_to_levels(control_value: float) -> tuple[int, int]:
     return 0, 0
 
 
+class AtoStrategyOptimizer:
+    WEIGHTS = {
+        "approach_station": {"stop": 0.25, "comfort": 0.30, "energy": 0.20, "efficiency": 0.25},
+        "braking_to_stop": {"stop": 0.40, "comfort": 0.30, "energy": 0.15, "efficiency": 0.15},
+        "creep": {"stop": 0.65, "comfort": 0.20, "energy": 0.10, "efficiency": 0.05},
+        "cruise": {"stop": 0.05, "comfort": 0.25, "energy": 0.35, "efficiency": 0.35},
+    }
+    TIE_BREAK_PRIORITY = {
+        "precise_stop": 0,
+        "comfort_brake": 1,
+        "energy_saving": 2,
+        "conservative_brake": 3,
+    }
+    STRATEGY_BIAS = {
+        "cruise": {
+            "energy_saving": 0.20,
+            "comfort_brake": 0.05,
+            "conservative_brake": -0.10,
+            "precise_stop": -0.20,
+        },
+        "approach_station": {
+            "comfort_brake": 0.16,
+            "energy_saving": 0.05,
+            "conservative_brake": -0.08,
+            "precise_stop": -0.15,
+        },
+        "braking_to_stop": {
+            "comfort_brake": 0.08,
+            "conservative_brake": 0.03,
+            "energy_saving": -0.05,
+        },
+        "creep": {
+            "precise_stop": 0.25,
+            "energy_saving": -0.20,
+        },
+    }
+
+    def generate_candidate_strategies(
+        self,
+        *,
+        safe_speed_limit: float,
+        stop_curve_speed_limit: float,
+        current_speed: float,
+        distance_to_target: float | None,
+        approach_distance: float | None,
+        ato_state: str,
+        creep_speed_limit: float = 5.0,
+    ) -> list[dict]:
+        del distance_to_target, approach_distance, ato_state
+        safe_limit = max(_to_float(safe_speed_limit), 0.0)
+        curve_limit = max(_to_float(stop_curve_speed_limit), 0.0)
+        current_speed = max(_to_float(current_speed), 0.0)
+        raw_candidates = [
+            ("conservative_brake", curve_limit * 0.75, "Earlier braking with a lower target speed."),
+            ("comfort_brake", curve_limit * 0.90, "Balanced, smooth braking for station approach."),
+            ("energy_saving", max(curve_limit * 0.95, current_speed * 0.90), "Coast-oriented target."),
+            ("precise_stop", min(curve_limit * 0.55, creep_speed_limit), "Low-speed target for stopping accuracy."),
+        ]
+        candidates = []
+        for strategy, target_speed, description in raw_candidates:
+            target_speed = min(target_speed, safe_limit, curve_limit)
+            candidates.append(
+                {
+                    "strategy": strategy,
+                    "target_speed": round(max(target_speed, 0.0), 1),
+                    "description": description,
+                }
+            )
+        return candidates
+
+    def score_strategy(self, candidate: dict, context: dict) -> dict:
+        target_speed = max(_to_float(candidate.get("target_speed")), 0.0)
+        safe_speed_limit = max(_to_float(context.get("safe_speed_limit")), 0.0)
+        stop_curve_speed_limit = max(_to_float(context.get("stop_curve_speed_limit")), 0.0)
+        current_speed = max(_to_float(context.get("current_speed")), 0.0)
+        distance_to_target = context.get("distance_to_target")
+        distance_to_target = None if distance_to_target is None else max(_to_float(distance_to_target), 0.0)
+        approach_distance = max(_to_float(context.get("approach_distance"), 600.0), 1.0)
+        ato_state = context.get("ato_state", "cruise")
+        weights = self.WEIGHTS.get(ato_state, self.WEIGHTS["cruise"])
+
+        proximity = 0.0
+        if distance_to_target is not None:
+            proximity = clamp(1.0 - distance_to_target / approach_distance, 0.0, 1.0)
+        low_speed_score = 1.0 - self._ratio(target_speed, max(stop_curve_speed_limit, 1.0))
+        curve_score = 1.0 - abs(target_speed - stop_curve_speed_limit) / max(stop_curve_speed_limit, 1.0)
+        stop_accuracy_score = clamp(proximity * low_speed_score + (1.0 - proximity) * curve_score, 0.0, 1.0)
+        comfort_score = clamp(1.0 - abs(target_speed - current_speed) / max(safe_speed_limit, current_speed, 1.0), 0.0, 1.0)
+        energy_score = comfort_score
+        efficiency_score = clamp(self._ratio(target_speed, max(safe_speed_limit, 1.0)), 0.0, 1.0)
+        overspeed_penalty = 1.0 if target_speed > safe_speed_limit else 0.0
+        ma_violation_penalty = 1.0 if safe_speed_limit <= 0 or stop_curve_speed_limit < 0 else 0.0
+        score = (
+            weights["stop"] * stop_accuracy_score
+            + weights["comfort"] * comfort_score
+            + weights["energy"] * energy_score
+            + weights["efficiency"] * efficiency_score
+            - 5.0 * overspeed_penalty
+            - 5.0 * ma_violation_penalty
+        )
+        score += self.STRATEGY_BIAS.get(ato_state, {}).get(candidate.get("strategy"), 0.0)
+        return {
+            "strategy": candidate.get("strategy"),
+            "target_speed": target_speed,
+            "score": round(clamp(score, -10.0, 1.0), 3),
+        }
+
+    def select_strategy(self, candidates: list[dict], context: dict) -> dict:
+        strategy_scores = [self.score_strategy(candidate, context) for candidate in candidates]
+        selected = max(
+            strategy_scores,
+            key=lambda item: (item["score"], -self.TIE_BREAK_PRIORITY.get(item["strategy"], 99)),
+        )
+        return {
+            "selected_strategy": selected["strategy"],
+            "score": selected["score"],
+            "target_speed": selected["target_speed"],
+            "strategy_scores": strategy_scores,
+            "reason": "strategy_optimized",
+        }
+
+    def optimize(
+        self,
+        *,
+        safe_speed_limit: float,
+        stop_curve_speed_limit: float,
+        current_speed: float,
+        distance_to_target: float | None,
+        approach_distance: float | None,
+        ato_state: str,
+        creep_speed_limit: float = 5.0,
+    ) -> dict:
+        context = {
+            "safe_speed_limit": safe_speed_limit,
+            "stop_curve_speed_limit": stop_curve_speed_limit,
+            "current_speed": current_speed,
+            "distance_to_target": distance_to_target,
+            "approach_distance": approach_distance,
+            "ato_state": ato_state,
+        }
+        candidates = self.generate_candidate_strategies(
+            safe_speed_limit=safe_speed_limit,
+            stop_curve_speed_limit=stop_curve_speed_limit,
+            current_speed=current_speed,
+            distance_to_target=distance_to_target,
+            approach_distance=approach_distance,
+            ato_state=ato_state,
+            creep_speed_limit=creep_speed_limit,
+        )
+        return self.select_strategy(candidates, context)
+
+    def _ratio(self, value: float, denominator: float) -> float:
+        if denominator <= 0:
+            return 0.0
+        return value / denominator
+
+
 class PIDController:
     def __init__(
         self,
@@ -128,12 +285,14 @@ class AtoController:
         self,
         stop_targets=None,
         pid_controller_factory=None,
+        strategy_optimizer=None,
         low_speed_threshold=0.5,
         creep_speed_limit=5.0,
         stop_deceleration=0.8,
     ):
         self.stop_targets = stop_targets if stop_targets is not None else STOP_TARGETS
         self.pid_controller_factory = pid_controller_factory or PIDController
+        self.strategy_optimizer = strategy_optimizer or AtoStrategyOptimizer()
         self.low_speed_threshold = low_speed_threshold
         self.creep_speed_limit = creep_speed_limit
         self.stop_deceleration = stop_deceleration
@@ -207,6 +366,8 @@ class AtoController:
                 distance_to_target=None,
                 holding_brake=False,
                 reason="no_stop_target",
+                selected_strategy="cruise",
+                strategy_scores=[],
             )
 
         target_position = _to_float(stop_target.get("position"), 0.0)
@@ -240,6 +401,8 @@ class AtoController:
                 brake_level=0,
                 holding_brake=True,
                 reason="stopped_in_window",
+                selected_strategy="holding",
+                strategy_scores=[],
             )
 
         if 0 <= distance_to_target <= 5.0:
@@ -255,6 +418,14 @@ class AtoController:
                 distance_to_target=distance_to_target,
                 holding_brake=False,
                 reason="creep_to_stop",
+                optimize_context={
+                    "safe_speed_limit": safe_speed_limit,
+                    "stop_curve_speed_limit": stop_curve_speed_limit,
+                    "current_speed": current_speed,
+                    "distance_to_target": distance_to_target,
+                    "approach_distance": approach_distance,
+                    "ato_state": "creep",
+                },
             )
 
         if 5.0 < distance_to_target <= approach_distance:
@@ -276,6 +447,14 @@ class AtoController:
                 distance_to_target=distance_to_target,
                 holding_brake=False,
                 reason=reason,
+                optimize_context={
+                    "safe_speed_limit": safe_speed_limit,
+                    "stop_curve_speed_limit": stop_curve_speed_limit,
+                    "current_speed": current_speed,
+                    "distance_to_target": distance_to_target,
+                    "approach_distance": approach_distance,
+                    "ato_state": ato_state,
+                },
             )
 
         return self._command_with_pid(
@@ -289,6 +468,8 @@ class AtoController:
             distance_to_target=distance_to_target,
             holding_brake=False,
             reason="far_from_stop_target",
+            selected_strategy="energy_saving",
+            strategy_scores=[],
         )
 
     def _command_with_pid(
@@ -303,10 +484,23 @@ class AtoController:
         distance_to_target,
         holding_brake,
         reason,
+        optimize_context=None,
+        selected_strategy="pid_basic",
+        score=None,
+        strategy_scores=None,
     ) -> dict:
         vehicle_id = train_state.get("vehicle_id")
         current_speed = _to_float(train_state.get("speed"), 0.0)
         target_speed = round(max(min(target_speed, safe_speed_limit), 0.0), 1)
+        if optimize_context is not None:
+            optimization = self.strategy_optimizer.optimize(
+                **optimize_context,
+                creep_speed_limit=self.creep_speed_limit,
+            )
+            target_speed = round(max(min(optimization["target_speed"], safe_speed_limit), 0.0), 1)
+            selected_strategy = optimization["selected_strategy"]
+            score = optimization["score"]
+            strategy_scores = optimization["strategy_scores"]
         pid = self._pid_for_vehicle(vehicle_id)
         control_value = pid.update(target_speed, current_speed, dt=0.25)
         traction_level, brake_level = control_value_to_levels(control_value)
@@ -325,6 +519,9 @@ class AtoController:
             brake_level=brake_level,
             holding_brake=holding_brake,
             reason=reason,
+            selected_strategy=selected_strategy,
+            score=score,
+            strategy_scores=strategy_scores or [],
         )
 
     def _degraded_command(
@@ -349,6 +546,8 @@ class AtoController:
             brake_level=5,
             holding_brake=False,
             reason=reason,
+            selected_strategy="safety_stop",
+            strategy_scores=[],
         )
 
     def _base_command(
@@ -365,6 +564,9 @@ class AtoController:
         brake_level,
         holding_brake,
         reason,
+        selected_strategy="pid_basic",
+        score=None,
+        strategy_scores=None,
     ) -> dict:
         target_speed = round(max(min(target_speed, safe_speed_limit), 0.0), 1)
         if stop_target:
@@ -394,8 +596,9 @@ class AtoController:
             "traction_level": traction_level,
             "brake_level": brake_level,
             "holding_brake": holding_brake,
-            "selected_strategy": "pid_basic",
-            "score": None,
+            "selected_strategy": selected_strategy,
+            "score": score,
+            "strategy_scores": strategy_scores or [],
             "reason": reason,
             "speed_limit_reason": ma_limit.get("speed_limit_reason"),
         }

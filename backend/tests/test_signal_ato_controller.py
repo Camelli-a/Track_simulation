@@ -8,6 +8,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.services.signal_ato_controller import (  # noqa: E402
     AtoController,
+    AtoStrategyOptimizer,
     PIDController,
     calculate_stop_curve_speed_limit,
     control_value_to_levels,
@@ -209,3 +210,160 @@ def test_target_speed_never_exceeds_safe_speed_limit():
             _ma_limit(speed_limit=30.0),
         )
         assert command["target_speed"] <= command["safe_speed_limit"]
+
+
+def test_optimizer_generates_four_candidate_strategies():
+    optimizer = AtoStrategyOptimizer()
+
+    candidates = optimizer.generate_candidate_strategies(
+        safe_speed_limit=60.0,
+        stop_curve_speed_limit=50.0,
+        current_speed=40.0,
+        distance_to_target=200.0,
+        approach_distance=600.0,
+        ato_state="approach_station",
+    )
+
+    assert {item["strategy"] for item in candidates} == {
+        "conservative_brake",
+        "comfort_brake",
+        "energy_saving",
+        "precise_stop",
+    }
+
+
+def test_optimizer_candidates_do_not_exceed_safe_speed_limit():
+    optimizer = AtoStrategyOptimizer()
+
+    candidates = optimizer.generate_candidate_strategies(
+        safe_speed_limit=30.0,
+        stop_curve_speed_limit=50.0,
+        current_speed=40.0,
+        distance_to_target=200.0,
+        approach_distance=600.0,
+        ato_state="approach_station",
+    )
+
+    assert all(item["target_speed"] <= 30.0 for item in candidates)
+
+
+def test_optimizer_selects_highest_score():
+    optimizer = AtoStrategyOptimizer()
+    context = {
+        "safe_speed_limit": 60.0,
+        "stop_curve_speed_limit": 50.0,
+        "current_speed": 40.0,
+        "distance_to_target": 200.0,
+        "approach_distance": 600.0,
+        "ato_state": "approach_station",
+    }
+
+    result = optimizer.optimize(**context)
+
+    assert result["score"] == max(item["score"] for item in result["strategy_scores"])
+
+
+def test_precise_stop_preferred_near_target():
+    optimizer = AtoStrategyOptimizer()
+
+    result = optimizer.optimize(
+        safe_speed_limit=30.0,
+        stop_curve_speed_limit=5.0,
+        current_speed=4.0,
+        distance_to_target=3.0,
+        approach_distance=600.0,
+        ato_state="creep",
+    )
+
+    assert result["selected_strategy"] == "precise_stop"
+
+
+def test_energy_saving_preferred_far_from_target_or_cruise():
+    optimizer = AtoStrategyOptimizer()
+
+    result = optimizer.optimize(
+        safe_speed_limit=60.0,
+        stop_curve_speed_limit=60.0,
+        current_speed=40.0,
+        distance_to_target=500.0,
+        approach_distance=600.0,
+        ato_state="cruise",
+    )
+
+    assert result["selected_strategy"] == "energy_saving"
+
+
+def test_comfort_brake_preferred_in_normal_approach():
+    optimizer = AtoStrategyOptimizer()
+
+    result = optimizer.optimize(
+        safe_speed_limit=60.0,
+        stop_curve_speed_limit=60.0,
+        current_speed=40.0,
+        distance_to_target=200.0,
+        approach_distance=600.0,
+        ato_state="approach_station",
+    )
+
+    assert result["selected_strategy"] == "comfort_brake"
+
+
+def test_degraded_bypasses_optimizer():
+    controller = AtoController()
+
+    command = controller.build_ato_command_for_train(
+        _train_state(position=900.0, speed=20.0),
+        _ma_limit(speed_limit=0.0, permission="stop", reason="signal_stop"),
+    )
+
+    assert command["selected_strategy"] == "safety_stop"
+    assert command["strategy_scores"] == []
+
+
+def test_holding_bypasses_optimizer():
+    controller = AtoController()
+
+    command = controller.build_ato_command_for_train(
+        _train_state(position=1200.2, speed=0.2),
+        _ma_limit(speed_limit=40.0),
+    )
+
+    assert command["selected_strategy"] == "holding"
+    assert command["strategy_scores"] == []
+
+
+def test_optimized_target_speed_never_exceeds_safe_speed_limit():
+    controller = AtoController()
+
+    for position in (900.0, 1190.0, 1197.0):
+        command = controller.build_ato_command_for_train(
+            _train_state(position=position, speed=20.0),
+            _ma_limit(speed_limit=30.0),
+        )
+        assert command["target_speed"] <= command["safe_speed_limit"]
+
+
+def test_ato_command_includes_strategy_score_fields():
+    controller = AtoController()
+
+    command = controller.build_ato_command_for_train(
+        _train_state(position=900.0, speed=20.0),
+        _ma_limit(speed_limit=40.0),
+    )
+
+    assert command["selected_strategy"] != "pid_basic"
+    assert isinstance(command["score"], float)
+    assert len(command["strategy_scores"]) == 4
+
+
+def test_strategy_scores_has_no_type_or_timestamp():
+    controller = AtoController()
+
+    command = controller.build_ato_command_for_train(
+        _train_state(position=900.0, speed=20.0),
+        _ma_limit(speed_limit=40.0),
+    )
+
+    for strategy_score in command["strategy_scores"]:
+        assert "type" not in strategy_score
+        assert "timestamp" not in strategy_score
