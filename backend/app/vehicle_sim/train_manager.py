@@ -1,5 +1,5 @@
 from .adapters.command_mapping import command_percent_to_levels
-from .adapters.id_mapping import MAX_TRAINS, index_to_vehicle_id, vehicle_id_to_index
+from .adapters.id_mapping import UDP_TRAIN_SLOTS, index_to_vehicle_id
 from .mock_data import DEFAULT_TRACK
 from .models import DriverInput
 from .track_map import TrackMap
@@ -23,14 +23,9 @@ class TrainManager:
         position: float = 0.0,
         line_id: str = "LINE-1",
     ) -> dict:
-        if len(self.trains) >= MAX_TRAINS:
-            return {"ok": False, "reason": "max_trains_reached"}
-
         if slot is None:
             slot = self._first_free_slot()
-        if slot is None:
-            return {"ok": False, "reason": "no_free_slot"}
-        if not 1 <= slot <= MAX_TRAINS:
+        if slot < 1:
             return {"ok": False, "reason": "slot_out_of_range", "slot": slot}
         if slot in self.slot_to_vehicle_id:
             return {"ok": False, "reason": "slot_occupied", "slot": slot}
@@ -89,7 +84,7 @@ class TrainManager:
         return {"ok": True, "removed": removed}
 
     def reset_trains(self, count: int = DEFAULT_INITIAL_TRAINS) -> dict:
-        count = max(0, min(int(count), MAX_TRAINS))
+        count = max(0, int(count))
         self.clear_trains()
         for slot in range(1, count + 1):
             self.add_train(
@@ -130,7 +125,7 @@ class TrainManager:
         dt: float = 0.1,
     ) -> list[dict]:
         outputs = []
-        for slot in range(1, MAX_TRAINS + 1):
+        for slot in range(1, UDP_TRAIN_SLOTS + 1):
             train = self.get_train_by_slot(slot)
             if train is None:
                 continue
@@ -167,10 +162,11 @@ class TrainManager:
         return outputs
 
     def _first_free_slot(self) -> int | None:
-        for slot in range(1, MAX_TRAINS + 1):
+        slot = 1
+        while True:
             if slot not in self.slot_to_vehicle_id:
                 return slot
-        return None
+            slot += 1
 
     def _default_position_for_slot(self, slot: int) -> float:
         if slot == 1:

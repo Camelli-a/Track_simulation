@@ -24,6 +24,8 @@ from app.vehicle_sim.train_manager import TrainManager
 def test_id_and_unit_mapping():
     assert vehicle_id_to_index("TRAIN-001") == 1
     assert index_to_vehicle_id(2) == "TRAIN-002"
+    assert vehicle_id_to_index("TRAIN-021") == 21
+    assert index_to_vehicle_id(25) == "TRAIN-025"
     assert ms_to_cms(12.345) == 1234
     assert ms_to_mms(12.345) == 12345
     assert m_to_cm(123.456) == 12346
@@ -79,6 +81,19 @@ def test_pack_protocol_train_states_uses_position_as_mileage():
 
     output = unpack_vehicle_output(packet)
     assert output[1] == {"acceleration": 0.2, "speed": 36.0, "mileage": 88.5}
+
+
+def test_udp_codec_ignores_internal_trains_beyond_protocol_slots():
+    manager = TrainManager()
+    manager.reset_trains(25)
+
+    packet = pack_vehicle_output(manager)
+    output = unpack_vehicle_output(packet)
+
+    assert len(manager.trains) == 25
+    assert len(packet) == OUTPUT_PACKET_SIZE
+    assert set(output) == set(range(1, 21))
+    assert manager.get_train_by_slot(21) is not None
 
 
 def test_vehicle_input_clamps_percent_and_builds_driver_messages():

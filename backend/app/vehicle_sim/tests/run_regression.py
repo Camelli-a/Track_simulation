@@ -60,15 +60,14 @@ def test_add_train_auto_slot():
     assert manager.get_slot("TRAIN-099") == 3
 
 
-def test_add_train_until_max_20():
+def test_add_train_beyond_udp_slots():
     manager = TrainManager()
-    for _ in range(10):
+    for _ in range(15):
         result = manager.add_train()
         assert result["ok"] is True
-    assert len(manager.trains) == 20
-    result = manager.add_train(vehicle_id="TRAIN-021")
-    assert result["ok"] is False
-    assert result["reason"] == "max_trains_reached"
+    assert len(manager.trains) == 25
+    assert manager.get_train_by_slot(21) is not None
+    assert manager.get_train_by_slot(25) is not None
 
 
 def test_remove_train():
@@ -134,7 +133,7 @@ def test_apply_udp_commands_only_active_trains():
 def run_dynamic_manager_checks():
     test_dynamic_train_manager_initial_count()
     test_add_train_auto_slot()
-    test_add_train_until_max_20()
+    test_add_train_beyond_udp_slots()
     test_remove_train()
     test_clear_and_reset()
     test_vehicle_udp_output_packet_size()

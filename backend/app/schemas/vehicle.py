@@ -37,10 +37,10 @@ class VehicleControlResponse(BaseModel):
 class VehicleManagementRequest(BaseModel):
     type: Literal["add_train", "remove_train", "clear_trains", "reset_trains"]
     vehicle_id: Optional[str] = None
-    train_index: Optional[int] = Field(default=None, ge=1, le=20)
+    train_index: Optional[int] = Field(default=None, ge=1)
     line_id: str = Field(default="LINE-1")
     position: float = Field(default=0.0, ge=0)
-    count: Optional[int] = Field(default=None, ge=0, le=20)
+    count: Optional[int] = Field(default=None, ge=0)
 
 
 class VehicleManagementResponse(BaseModel):

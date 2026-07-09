@@ -83,3 +83,24 @@ def test_vehicle_trains_endpoint_reports_default_count():
     data = response.json()
     assert data["count"] == 10
     assert data["trains"][0]["vehicle_id"] == "TRAIN-001"
+
+
+def test_vehicle_manage_allows_more_than_udp_slot_count(monkeypatch):
+    monkeypatch.setattr(vehicle_endpoint, "publish_module_message", lambda topic, data: True)
+    vehicle_endpoint.vehicle_manager.reset_trains(10)
+
+    response = TestClient(app).post(
+        "/api/v1/vehicle/manage",
+        json={
+            "type": "add_train",
+            "vehicle_id": "TRAIN-021",
+            "train_index": 21,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["result"]["vehicle_id"] == "TRAIN-021"
+    assert data["result"]["train_index"] == 21
+    assert any(item["vehicle_id"] == "TRAIN-021" for item in data["trains"])

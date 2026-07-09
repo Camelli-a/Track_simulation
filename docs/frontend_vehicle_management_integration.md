@@ -30,14 +30,16 @@ backend/app/vehicle_sim/train_manager.py
 
 - `TrainManager()` 启动后默认创建 10 辆车。
 - 默认车辆为 `TRAIN-001` 到 `TRAIN-010`。
-- 每辆车占用正式协议中的一个 `train_index` 槽位。
-- 正式 UDP 协议固定 1~20 槽位，但车辆模块内部只维护激活车辆。
+- 每辆车占用一个内部 `train_index` 槽位。
+- 正式 UDP 协议固定 1~20 槽位，但这只是 UDP 报文一次能携带的槽位数量，不是车辆模块的车辆数量上限。
+- 车辆模块内部可以动态维护任意数量激活车辆。
 - 空槽位只在 UDP 打包时补 `0.0`，不会输出空车 JSON。
 
 关键限制：
 
-- 最大车辆数：20。
-- `train_index` 范围：1~20。
+- 内部车辆数量：不设置固定上限。
+- `train_index` 范围：大于等于 1。
+- UDP 打包范围：只导出 `train_index` 1~20 的车辆到固定 480 字节报文。
 - 添加车辆时如果不指定 `train_index`，后端会自动分配最小空闲槽位。
 - 删除车辆会释放对应槽位。
 - 如果车辆算法模块收到 `set_train_state`，但对应车辆还不存在，会按 `vehicle_id` / `train_index` 自动补建车辆，再应用该状态；这样联调时状态消息先到也不会被静默忽略。
@@ -88,7 +90,7 @@ backend/app/vehicle_sim/train_manager.py
 - `position` 可选，默认 `0.0`，单位 m。
 - `line_id` 可选，默认 `LINE-1`。
 - 如果 `train_index` 已被占用，后端会返回失败，不会覆盖旧车。
-- 如果已经有 20 辆车，后端会返回失败。
+- 如果 `train_index` 大于 20，该车仍然会被内部车辆管理、REST/ZMQ/JSON 状态输出；只是不会进入固定 480 字节 UDP 报文。
 
 ### 4.2 删除车辆
 
@@ -155,7 +157,7 @@ backend/app/vehicle_sim/train_manager.py
 
 说明：
 
-- `count` 会被限制在 `0~20`。
+- `count` 只要求大于等于 `0`，不受 UDP 20 槽位限制。
 - 如果不传，建议前端默认传 `10`。
 
 ## 5. 预期返回结果
@@ -181,15 +183,6 @@ backend/app/vehicle_sim/train_manager.py
   "ok": false,
   "reason": "slot_occupied",
   "slot": 11
-}
-```
-
-添加失败，达到 20 辆上限：
-
-```json
-{
-  "ok": false,
-  "reason": "max_trains_reached"
 }
 ```
 
@@ -294,7 +287,7 @@ GET /api/v1/dashboard/snapshot
 
 | 字段 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `count` | 是 | `10` | 范围 0~20 |
+| `count` | 是 | `10` | 大于等于 0 |
 
 ## 8. 当前后端对接状态
 

@@ -1,7 +1,7 @@
 import struct
 
 from .command_mapping import clamp_percent, command_percent_to_levels
-from .id_mapping import MAX_TRAINS
+from .id_mapping import UDP_TRAIN_SLOTS
 
 MODEL_IP = "192.168.200.110"
 MODEL_PORT = 23001
@@ -16,16 +16,21 @@ INPUT_VALUES_PER_TRAIN = 2
 OUTPUT_FIELDS_PER_TRAIN = OUTPUT_VALUES_PER_TRAIN
 INPUT_FIELDS_PER_TRAIN = INPUT_VALUES_PER_TRAIN
 
-OUTPUT_PACKET_SIZE = MAX_TRAINS * OUTPUT_FIELDS_PER_TRAIN * 8
-INPUT_PACKET_SIZE = MAX_TRAINS * INPUT_FIELDS_PER_TRAIN * 8
+OUTPUT_PACKET_SIZE = UDP_TRAIN_SLOTS * OUTPUT_FIELDS_PER_TRAIN * 8
+INPUT_PACKET_SIZE = UDP_TRAIN_SLOTS * INPUT_FIELDS_PER_TRAIN * 8
 
 
 def pack_vehicle_output(train_manager_or_states) -> bytes:
-    """Pack 1..20 train states into the formal little-endian UDP payload."""
+    """Pack UDP slots 1..20 into the formal little-endian UDP payload.
+
+    The internal vehicle manager can maintain more trains than the UDP protocol
+    frame carries. This adapter intentionally exports only the fixed formal
+    UDP slots and leaves higher internal slots to JSON/ZMQ/REST paths.
+    """
     values = []
     train_states = _states_by_slot(train_manager_or_states)
 
-    for train_index in range(1, MAX_TRAINS + 1):
+    for train_index in range(1, UDP_TRAIN_SLOTS + 1):
         state = train_states.get(train_index)
         if state is None:
             values.extend([0.0, 0.0, 0.0])
@@ -46,11 +51,11 @@ def unpack_vehicle_output(data: bytes) -> dict[int, dict]:
         )
 
     values = struct.unpack(
-        ENDIANNESS + "d" * (MAX_TRAINS * OUTPUT_FIELDS_PER_TRAIN),
+        ENDIANNESS + "d" * (UDP_TRAIN_SLOTS * OUTPUT_FIELDS_PER_TRAIN),
         data,
     )
     result = {}
-    for i in range(MAX_TRAINS):
+    for i in range(UDP_TRAIN_SLOTS):
         offset = i * OUTPUT_FIELDS_PER_TRAIN
         result[i + 1] = {
             "acceleration": values[offset],
@@ -68,12 +73,12 @@ def unpack_vehicle_input(data: bytes) -> dict[int, dict]:
     data = data[:INPUT_PACKET_SIZE]
 
     values = struct.unpack(
-        ENDIANNESS + "d" * (MAX_TRAINS * INPUT_FIELDS_PER_TRAIN),
+        ENDIANNESS + "d" * (UDP_TRAIN_SLOTS * INPUT_FIELDS_PER_TRAIN),
         data,
     )
     result = {}
 
-    for i in range(MAX_TRAINS):
+    for i in range(UDP_TRAIN_SLOTS):
         train_index = i + 1
         command = int(values[i * INPUT_FIELDS_PER_TRAIN])
         percent = clamp_percent(values[i * INPUT_FIELDS_PER_TRAIN + 1])
@@ -91,7 +96,7 @@ def unpack_vehicle_input(data: bytes) -> dict[int, dict]:
 
 def pack_vehicle_input(commands: dict[int, dict]) -> bytes:
     values = []
-    for train_index in range(1, MAX_TRAINS + 1):
+    for train_index in range(1, UDP_TRAIN_SLOTS + 1):
         command = commands.get(train_index, {})
         values.append(float(command.get("command", 0)))
         values.append(clamp_percent(command.get("percent", 0.0)))
@@ -118,7 +123,7 @@ def pack_protocol_train_states(train_states: list[dict]) -> bytes:
     states_by_index = {}
     for state in train_states:
         train_index = int(state.get("train_index", 0))
-        if 1 <= train_index <= MAX_TRAINS:
+        if 1 <= train_index <= UDP_TRAIN_SLOTS:
             states_by_index[train_index] = state
     return pack_vehicle_output(states_by_index)
 
@@ -145,7 +150,7 @@ def _states_by_slot(train_manager_or_states) -> dict[int, dict]:
 
     if hasattr(train_manager_or_states, "get_train_by_slot"):
         states = {}
-        for slot in range(1, MAX_TRAINS + 1):
+        for slot in range(1, UDP_TRAIN_SLOTS + 1):
             train = train_manager_or_states.get_train_by_slot(slot)
             if train is not None:
                 states[slot] = train.state.to_protocol()
