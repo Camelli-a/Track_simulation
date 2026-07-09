@@ -16,7 +16,17 @@ def test_find_static_speed_limit_returns_matching_limit():
     limit = find_static_speed_limit(300.0)
 
     assert limit["limit_id"] == "SL-001"
-    assert limit["speed_limit"] == 60.0
+    assert limit["speed_limit"] == 48.0
+    assert limit["source"] == "teacher_static_speed_limit_table"
+
+
+def test_find_static_speed_limit_preserves_teacher_metadata():
+    limit = find_static_speed_limit(1940.0)
+
+    assert limit["limit_id"] == "SL-006"
+    assert limit["related_switch_id"] == "SW-01"
+    assert limit["speed_limit_raw"] == 2777
+    assert limit["speed_limit_unit"] == "cm/s"
 
 
 def test_find_static_speed_limit_returns_none_outside_sections():

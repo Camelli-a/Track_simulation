@@ -214,8 +214,8 @@
         "distance_to_ma": 155.0,
         "permission": "restricted",
         "signal_state": "yellow",
-        "speed_limit": 51.8,
-        "target_speed": 51.8,
+        "speed_limit": 48.0,
+        "target_speed": 48.0,
         "reason": "front_vehicle_protection",
         "front_vehicle_id": "TRAIN-002",
         "front_train_length": 120.0,
@@ -225,14 +225,16 @@
         "front_protection_point": 455.0,
         "current_speed": 40.0,
         "route_speed_limit": 80.0,
-        "static_speed_limit": 60.0,
+        "static_speed_limit": 48.0,
         "static_speed_limit_id": "SL-001",
+        "static_speed_limit_source": "teacher_static_speed_limit_table",
+        "static_speed_limit_related_switch_id": null,
         "fault_speed_limit": null,
         "required_stop_distance": 108.4,
         "emergency_stop_distance": 98.1,
         "warning_distance": 158.4,
         "braking_curve_speed_limit": 51.8,
-        "speed_limit_reason": "braking_curve",
+        "speed_limit_reason": "static_limit",
         "braking_model": "simplified_atp_braking_curve"
       }
     ]
@@ -405,11 +407,15 @@ bus.subscribe("train_state", on_train_state)
 
 `ma_state.data.ma_limits[]` 现在会同时输出并合成以下限速来源：
 
+`STATIC_SPEED_LIMITS` 当前来自老师 Excel 的静态限速表，原始限速值按 `cm/s * 0.036` 统一转换为 `km/h`，`start` / `end` 为当前一维累计坐标，单位 `m`。本阶段只接入静态线路限速，道岔侧向限速后续单独接入。
+
 | 字段 | 类型 | 单位 | 说明 |
 |------|------|------|------|
 | `route_speed_limit` | float | km/h | 进路限速 |
 | `static_speed_limit` | float\|null | km/h | 静态线路限速 |
 | `static_speed_limit_id` | string\|null | - | 命中的静态限速区间 ID |
+| `static_speed_limit_source` | string\|null | - | 静态限速来源，当前为老师静态限速表 |
+| `static_speed_limit_related_switch_id` | string\|null | - | 老师表中的关联道岔编号，缺失时为 null |
 | `fault_speed_limit` | float\|null | km/h | 车辆/系统故障限速 |
 | `braking_curve_speed_limit` | float\|null | km/h | ATP 制动曲线反推限速 |
 | `speed_limit` | float | km/h | 最终安全速度上限 |
@@ -448,6 +454,15 @@ ATO/车辆控制模块应把 `ma_state.speed_limit` 作为安全速度上限，�
         "target_position": 1200.0,
         "distance_to_target": 150.0,
         "station_id": "ST-01",
+        "target_id": "STOP-ST-001-PF-001-R-MAIN",
+        "station_name": "GGZ",
+        "platform_id": "PF-001",
+        "platform_name": "GGZ-P01",
+        "stop_target_source": "teacher_platform_table",
+        "gradient": -3.5,
+        "gradient_id": "GR-002",
+        "gradient_unit": "permille",
+        "effective_deceleration": 0.766,
         "stop_window": {
           "lower": 1199.5,
           "upper": 1200.5
@@ -470,6 +485,10 @@ ATO/车辆控制模块应把 `ma_state.speed_limit` 作为安全速度上限，�
 
 ATO 第一版只输出目标速度、停车曲线和牵引/制动级位建议，不直接更新车辆速度、位置、加速度。车辆模块订阅 `ato_command` 后自行执行动力学。`target_speed` 必须始终小于等于 `safe_speed_limit`，其中 `safe_speed_limit` 来自 `ma_state.speed_limit`。
 
+`STOP_TARGETS` 由 `signal_track_config.py` 的线路静态配置提供。当前优先使用老师 Excel 车站表 / 站台表抽取出的站台中心公里标，并按 `route.start <= platform.position <= route.end` 关联到进路；后续无法匹配的进路可 fallback 到 `route.end` / `end_signal_id`。业务 `data` 内仍不包含 `type` / `timestamp`。
+
+`GRADIENT_PROFILE` 来自老师 Excel 坡度表的离线抽取。坡度按千分坡 `permille` 处理，`0x55` 第一版视为上坡、`0xaa` 视为下坡。ATO 根据列车当前位置查询坡度并计算 `effective_deceleration`：上坡提高有效制动减速度，下坡降低有效制动减速度；该修正只影响 ATO 停车曲线和 `target_speed` 策略，本阶段不修改 MA/ATP 安全边界。
+
 ATO 优化模型采用可解释的多目标评分方法，不引入 sklearn / PyTorch / TensorFlow，也不做深度学习训练。优化器只在 `approach_station` / `braking_to_stop` / `creep` 等状态中选择目标速度策略，PID 仍负责跟踪目标速度并输出牵引/制动级位。
 
 策略字段：
@@ -477,6 +496,7 @@ ATO 优化模型采用可解释的多目标评分方法，不引入 sklearn / Py
 - `selected_strategy`：当前选中的策略，例如 `conservative_brake` / `comfort_brake` / `energy_saving` / `precise_stop` / `safety_stop` / `holding`。
 - `score`：选中策略评分，非优化状态可为 `null`。
 - `strategy_scores`：候选策略评分列表，每项包含 `strategy`、`target_speed`、`score`。
+- `target_id` / `station_name` / `platform_id` / `platform_name` / `stop_target_source`：停车目标来源与站台元数据。
 
 优化器永远不能突破 `ma_state.speed_limit`：`target_speed <= safe_speed_limit`。
 
