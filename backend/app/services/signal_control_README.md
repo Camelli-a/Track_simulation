@@ -1,18 +1,16 @@
-# Signal Control Module
+# 信号控制模块说明
 
-本文档说明当前信号控制最小版本的职责、输入输出协议、HTTP 接口返回结构和演示场景。
+本文档说明当前信号控制模块的定位、输入输出、HTTP 调试接口、ZMQ topic、老师线路数据接入情况、MA 计算逻辑、简化 ATP 制动曲线，以及当前仍保留的简化假设。
 
-## 模块职责
+## 1. 模块定位
 
-信号控制模块位于 `backend/app/services/signal_control.py`，当前负责：
+本模块是轨道交通教学仿真项目中的信号控制 / 联锁 / ZC-lite 模块，核心代码位于：
 
-- 区段占用：根据列车 `position` 判断列车所在区段，并输出 `sections`。
-- 道岔闭锁：维护 demo 道岔 `SW-01` 的位置和锁闭状态，并输出 `switches`。
-- 进路冲突：根据临时进路申请判断道岔位置和锁闭方是否冲突，并输出 `route_results`。
-- MA 计算：根据同一进路前车位置和安全距离计算移动授权终点，并输出 `ma_limits`。
-- 信号约束输出：根据列车到 MA 的距离输出 `permission`、`signal_state`、`speed_limit` 等约束。
+- `backend/app/services/signal_control.py`
+- `backend/app/services/signal_track_config.py`
+- `backend/app/services/signal_zmq_adapter.py`
 
-核心入口：
+核心入口函数：
 
 ```python
 calculate_signal_snapshot(
@@ -21,77 +19,229 @@ calculate_signal_snapshot(
 ) -> dict
 ```
 
-## 输入协议
+当前职责：
 
-### train_states
+- 接收列车状态 `train_state`。
+- 根据线路静态数据计算区段占用。
+- 根据道岔状态和进路需求判断进路冲突。
+- 计算每辆车的 MA 移动授权。
+- 基于简化 ATP 制动曲线输出 `permission`、`signal_state`、`speed_limit`。
+- 输出 `signal_state` 和 `ma_state`。
 
-`train_states` 表示当前所有列车状态。每项包含：
+需要强调的是，本模块不是工业 SIL4 安全系统。当前实现是课程设计中的简化 CBTC / MA / ATP 思想仿真，用于联调、展示和答辩说明。
+
+## 2. 输入数据
+
+ZMQ 订阅 topic：
+
+```text
+train_state
+```
+
+`data` 示例：
 
 ```json
 {
   "vehicle_id": "TRAIN-001",
   "position": 300.0,
   "speed": 40.0,
-  "route_id": "R_MAIN"
+  "route_id": "R_MAIN",
+  "train_length": 120.0
 }
 ```
 
 字段说明：
 
-- `vehicle_id`：列车 ID。
-- `position`：列车当前位置，单位为 m。
-- `speed`：列车当前速度。
-- `route_id`：列车当前运行进路。
+| 字段 | 说明 |
+|------|------|
+| `vehicle_id` | 列车编号 |
+| `position` | 线路一维坐标，单位 m |
+| `speed` | 速度，单位 km/h |
+| `route_id` | 当前进路，缺失时默认 `R_MAIN` |
+| `train_length` | 列车长度，缺失时使用 `DEFAULT_TRAIN_LENGTH` |
 
-### route_requests
-
-`route_requests` 表示临时进路申请，只用于进路冲突判断，不影响 `ma_limits` 的当前运行进路计算。每项包含：
+HTTP 调试接口中的 `route_requests` 用于临时进路申请，不和 `ma_limits` 的当前运行进路混在一起：
 
 ```json
-{
-  "vehicle_id": "TRAIN-003",
-  "route_id": "R_BRANCH"
-}
+[
+  {
+    "vehicle_id": "TRAIN-003",
+    "route_id": "R_BRANCH"
+  }
+]
 ```
 
-字段说明：
+## 3. 输出数据一：signal_state
 
-- `vehicle_id`：申请进路的列车 ID。
-- `route_id`：申请的目标进路。
+ZMQ 发布 topic：
 
-## 输出字段
+```text
+signal_state
+```
 
-`calculate_signal_snapshot()` 返回：
+`data` 包含：
 
 ```json
 {
-  "lights": [],
+  "system_mode": "normal",
   "signals": [],
   "sections": [],
   "switches": [],
-  "ma_limits": [],
   "route_results": []
 }
 ```
 
 字段说明：
 
-- `lights`：兼容旧前端的信号灯列表，只包含 `signal_id`、`position`、`state`。
-- `signals`：信号约束列表，包含 `state`、`signal_state`、`permission`、`route_id`。
-- `sections`：区段状态列表，包含占用、锁闭和区段状态。
-- `switches`：道岔状态列表，包含位置、锁闭方、关联区段和原因。
-- `ma_limits`：移动授权和速度约束列表。
-- `route_results`：临时进路申请结果列表。
+| 字段 | 说明 |
+|------|------|
+| `system_mode` | 系统模式，当前为 `normal` |
+| `signals` | 信号显示状态，包含 `state`、`signal_state`、`permission` 等 |
+| `sections` | 区段占用状态 |
+| `switches` | 道岔位置与锁闭状态 |
+| `route_results` | 进路申请结果，例如 `switch_locked_conflict` |
 
-## HTTP 接口
+## 4. 输出数据二：ma_state
 
-### 获取 mock 信号状态
+ZMQ 发布 topic：
 
-当前 mock 快照接口保持不变：
-
-```http
-GET /api/v1/signal/status
+```text
+ma_state
 ```
+
+`data` 包含：
+
+```json
+{
+  "ma_limits": []
+}
+```
+
+`ma_limits` 中重点字段：
+
+| 字段 | 说明 |
+|------|------|
+| `vehicle_id` | 列车编号 |
+| `position` | 当前列车位置，单位 m |
+| `route_id` | 当前进路 |
+| `ma_limit` | 移动授权终点，单位 m |
+| `distance_to_ma` | 当前车到 MA 终点的距离，单位 m |
+| `permission` | `allow` / `restricted` / `stop` |
+| `signal_state` | `green` / `yellow` / `red` |
+| `speed_limit` | 当前约束限速，单位 km/h |
+| `target_speed` | 建议目标速度，单位 km/h |
+| `reason` | MA 来源原因，例如 `front_vehicle_protection` / `route_end` |
+| `front_vehicle_id` | 前车编号，没有前车时为 `null` |
+| `front_protection_point` | 前车安全包络边界点 |
+| `front_train_length` | 前车长度 |
+| `location_uncertainty` | 定位误差裕量 |
+| `communication_margin` | 通信 / 计算延迟折算裕量 |
+| `safety_margin` | 固定安全裕量 |
+| `current_speed` | 当前速度，单位 km/h |
+| `route_speed_limit` | 进路限速，单位 km/h |
+| `required_stop_distance` | 常用制动停车距离 |
+| `emergency_stop_distance` | 紧急制动停车距离 |
+| `warning_distance` | restricted/yellow 预警距离 |
+| `braking_curve_speed_limit` | 按制动曲线反推的允许速度 |
+| `braking_model` | 当前为 `simplified_atp_braking_curve` |
+
+## 5. 老师线路数据接入情况
+
+`signal_track_config.py` 当前已经接入老师 Excel 的半真实静态数据：
+
+- `SECTIONS`：来自 `计轴区段表 + Seg表`，共 259 个区段。
+- `SWITCHES`：来自 `道岔表`，共 60 个道岔。
+- `SIGNALS`：来自 `信号机表`，共 157 个信号机。
+- `ROUTES`：来自 `进路表`，共 249 条真实进路，另保留 `R_MAIN` / `R_BRANCH` 兼容演示进路。
+
+当前限制：
+
+- `section.start` / `section.end` 当前是按表格顺序累计得到的一维近似坐标。
+- `signal.position` 当前也是累计坐标近似。
+- `required_switches` 第一版仍以人工配置为主。
+- `speed_limit` 第一版统一默认，尚未接静态限速表。
+- `side_speed_limit` 单位后续需要结合课程数据定义确认。
+
+## 6. MA 计算逻辑
+
+当前 MA 使用前车安全包络模型。
+
+有前车时：
+
+```text
+front_protection_point =
+  front_vehicle.position
+  - front_train_length
+  - location_uncertainty
+  - communication_margin
+  - safety_margin
+
+ma_limit = min(front_protection_point, route_end)
+```
+
+无前车时：
+
+```text
+ma_limit = route_end
+```
+
+默认参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `DEFAULT_TRAIN_LENGTH` | `120.0` | 默认列车长度，单位 m |
+| `LOCATION_UNCERTAINTY` | `5.0` | 定位误差裕量，单位 m |
+| `COMMUNICATION_MARGIN` | `10.0` | 通信 / 计算延迟折算裕量，单位 m |
+| `SAFETY_MARGIN` | `30.0` | 固定安全裕量，单位 m |
+
+这相当于简化版 ZC 移动授权计算：用前车位置反推前车尾部，再叠加定位误差、通信延迟裕量和固定安全裕量，得到后车不能越过的保护边界。
+
+## 7. 制动曲线限速逻辑
+
+当前不再使用固定 `80m / 200m` 阈值作为主逻辑，而是使用简化 ATP 制动距离模型。
+
+配置参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `REACTION_TIME` | `1.5` | 检测、通信、制动建立等反应时间，单位 s |
+| `SERVICE_BRAKE_DECELERATION` | `1.0` | 常用制动减速度，单位 m/s² |
+| `EMERGENCY_BRAKE_DECELERATION` | `1.2` | 紧急制动减速度，单位 m/s² |
+| `BRAKING_SAFETY_MARGIN` | `30.0` | 制动安全裕量，单位 m |
+| `WARNING_MARGIN` | `50.0` | 预警附加距离，单位 m |
+
+公式：
+
+```text
+speed_mps = speed_kmh / 3.6
+
+required_stop_distance =
+  speed_mps * REACTION_TIME
+  + speed_mps ** 2 / (2 * SERVICE_BRAKE_DECELERATION)
+  + BRAKING_SAFETY_MARGIN
+
+emergency_stop_distance =
+  speed_mps * REACTION_TIME
+  + speed_mps ** 2 / (2 * EMERGENCY_BRAKE_DECELERATION)
+  + BRAKING_SAFETY_MARGIN
+
+warning_distance =
+  required_stop_distance + WARNING_MARGIN
+```
+
+判断规则：
+
+- `distance_to_ma <= emergency_stop_distance`：`stop / red / speed_limit=0`
+- `distance_to_ma <= warning_distance`：`restricted / yellow / speed_limit=制动曲线反推限速`
+- 其他：`allow / green / speed_limit=route_speed_limit`
+
+制动曲线反推限速会用当前 `distance_to_ma` 反解可允许速度，并与 `route_speed_limit` 取较小值。
+
+## 8. HTTP 调试接口
+
+### GET /api/v1/signal/status
+
+用途：查看当前 mock / 默认信号状态。
 
 返回结构：
 
@@ -108,21 +258,9 @@ GET /api/v1/signal/status
 }
 ```
 
-`SignalService.get_status()` 当前仍使用内部 mock 数据，但已经通过协议字段调用：
+### POST /api/v1/signal/evaluate
 
-```python
-calculate_signal_snapshot(mock_train_states, mock_route_requests)
-```
-
-因此后续接真实车辆状态时，可以复用同一个核心入口。
-
-### 调试计算真实输入
-
-后端同学或车辆算法同学可以使用调试接口传入真实 `train_states` 和临时 `route_requests`，直接调用信号控制核心：
-
-```http
-POST /api/v1/signal/evaluate
-```
+用途：不用 ZMQ，手动传 `train_states` 和 `route_requests` 调试信号计算。
 
 请求示例：
 
@@ -133,13 +271,15 @@ POST /api/v1/signal/evaluate
       "vehicle_id": "TRAIN-001",
       "position": 300.0,
       "speed": 40.0,
-      "route_id": "R_MAIN"
+      "route_id": "R_MAIN",
+      "train_length": 120.0
     },
     {
       "vehicle_id": "TRAIN-002",
       "position": 620.0,
-      "speed": 40.0,
-      "route_id": "R_MAIN"
+      "speed": 30.0,
+      "route_id": "R_MAIN",
+      "train_length": 120.0
     }
   ],
   "route_requests": [
@@ -151,132 +291,82 @@ POST /api/v1/signal/evaluate
 }
 ```
 
-`route_requests` 可以不传，默认按空列表处理：
+该示例中：
 
-```json
-{
-  "train_states": [
-    {
-      "vehicle_id": "TRAIN-001",
-      "position": 300.0,
-      "speed": 40.0,
-      "route_id": "R_MAIN"
-    }
-  ]
-}
+- `TRAIN-001` 的 `ma_limit = 455.0`。
+- `permission = restricted`。
+- `signal_state = yellow`。
+- `route_results` 会产生 `switch_locked_conflict`。
+
+## 9. ZMQ 启动与验证
+
+启动顺序：
+
+终端 1：
+
+```bash
+python -m app.communication.broker
 ```
 
-返回结构与 `/api/v1/signal/status` 一致：
+终端 2：
+
+```bash
+python -m app.communication.mock_publisher
+```
+
+终端 3：
+
+```bash
+python -m app.communication.signal_worker
+```
+
+终端 4：
+
+```bash
+python -m app.communication.test_subscriber
+```
+
+说明：
+
+- `mock_publisher` 本身也会发布 `signal_state` / `ma_state`。
+- `signal_worker` 也会发布 `signal_state` / `ma_state`。
+- 因此测试时会看到两套消息。
+- `signal_worker` 的 `ma_state` 可通过 `braking_model` 字段识别。
+- `signal_worker` 的 `signal_state` 可通过 `route_results` 字段识别。
+
+ZMQ 包装格式由 `MessageBus` 自动生成：
 
 ```json
 {
+  "topic": "ma_state",
   "timestamp": 1720000000.0,
-  "system_mode": "normal",
-  "lights": [],
-  "signals": [],
-  "sections": [],
-  "switches": [],
-  "ma_limits": [],
-  "route_results": []
+  "data": {
+    "ma_limits": []
+  }
 }
 ```
 
-该接口只用于 HTTP 联调和算法验证，不接 ZMQ、WebSocket 或 UDP。
+注意：`data` 内不要再放 `type` 或 `timestamp`，避免双层包装。
 
-## 演示场景
+## 10. 当前简化假设与后续扩展
 
-### 多车 MA 防追尾
+当前简化假设：
 
-当同一进路上存在前车时，后车 MA 按以下规则计算：
+- 当前使用一维线路坐标。
+- `section.start` / `section.end` 是按表格顺序累计的近似坐标。
+- 真实 Seg 拓扑寻路尚未实现。
+- `route_request` 暂未通过 ZMQ 接入。
+- `required_switches` 尚未从真实进路自动推断。
+- 静态限速表、坡度表、保护区段表暂未接入。
+- 制动模型为简化匀减速模型，不是工业级安全制动模型。
+- 本系统用于课程设计仿真，不是 SIL4 安全级实现。
 
-```text
-ma_limit = front_vehicle.position - safe_distance
-```
+后续可扩展：
 
-当前 demo 中：
-
-```json
-{
-  "vehicle_id": "TRAIN-001",
-  "front_vehicle_id": "TRAIN-002",
-  "safe_distance": 120.0,
-  "ma_limit": 500.0,
-  "reason": "front_vehicle_protection"
-}
-```
-
-### yellow 限速
-
-当列车距离 MA 的距离满足：
-
-```text
-80m < distance_to_ma <= 200m
-```
-
-输出：
-
-```json
-{
-  "permission": "restricted",
-  "signal_state": "yellow",
-  "speed_limit": 30.0
-}
-```
-
-### switch_locked_conflict 道岔闭锁冲突
-
-当前 demo 道岔：
-
-```json
-{
-  "switch_id": "SW-01",
-  "position": "normal",
-  "locked": true,
-  "locked_by_route_id": "R_MAIN"
-}
-```
-
-进路要求：
-
-- `R_MAIN` 需要 `SW-01 = normal`
-- `R_BRANCH` 需要 `SW-01 = reverse`
-
-当 `TRAIN-003` 临时申请 `R_BRANCH` 时，因为 `SW-01` 已被 `R_MAIN` 锁闭为 `normal`，返回：
-
-```json
-{
-  "vehicle_id": "TRAIN-003",
-  "route_id": "R_BRANCH",
-  "allowed": false,
-  "reason": "switch_locked_conflict",
-  "required_switch_id": "SW-01",
-  "required_position": "reverse",
-  "current_position": "normal",
-  "locked_by_route_id": "R_MAIN"
-}
-```
-
-## 后续接 ZMQ 的使用方式
-
-当前版本不接 ZMQ、WebSocket 或 UDP。
-
-后续接 ZMQ 时，建议流程为：
-
-1. 后端接收车辆模块发送的 `train_state` 消息。
-2. 在后端维护当前所有列车状态表。
-3. 每次需要计算信号快照时，将所有列车状态整理成 `train_states`。
-4. 如有临时进路申请，将其整理成 `route_requests`。
-5. 调用：
-
-```python
-snapshot = calculate_signal_snapshot(train_states, route_requests)
-```
-
-6. 如需对外发布协议消息，可使用：
-
-```python
-signal_message = build_signal_state_message(snapshot)
-ma_message = build_ma_state_message(snapshot)
-```
-
-其中 ZMQ 只负责消息传输，信号控制规则仍保持在 `calculate_signal_snapshot()` 内部。
+- 接入 `route_request` topic。
+- 接入静态限速表。
+- 接入坡度表修正制动距离。
+- 根据 Seg 邻接关系生成真实拓扑里程。
+- 自动推断进路 `required_switches`。
+- 增加完整进路锁闭 / 解锁生命周期。
+- 与车辆 ATP / ATO 模块联动。

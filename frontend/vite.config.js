@@ -10,8 +10,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 开发时自动转发到后端，避免跨域
       '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/ws':  { target: 'ws://localhost:8000', ws: true },
     },
   },
 })
