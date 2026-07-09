@@ -32,3 +32,21 @@ class VehicleControlResponse(BaseModel):
     published: bool
     topic: Literal["driver_input", "ato_command"]
     message: Dict[str, Any]
+
+
+class VehicleManagementRequest(BaseModel):
+    type: Literal["add_train", "remove_train", "clear_trains", "reset_trains"]
+    vehicle_id: Optional[str] = None
+    train_index: Optional[int] = Field(default=None, ge=1)
+    line_id: str = Field(default="LINE-1")
+    position: float = Field(default=0.0, ge=0)
+    count: Optional[int] = Field(default=None, ge=0)
+
+
+class VehicleManagementResponse(BaseModel):
+    accepted: bool = True
+    ok: bool
+    published: bool
+    topic: Literal["add_train", "remove_train", "clear_trains", "reset_trains"]
+    result: Dict[str, Any]
+    trains: list[Dict[str, Any]]

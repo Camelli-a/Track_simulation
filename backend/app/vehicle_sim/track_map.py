@@ -27,3 +27,20 @@ class TrackMap:
 
     def get_stop_position(self, position: float) -> Optional[float]:
         return self.get_section(position).stop_position
+
+    def get_edge_info(self, position: float) -> dict:
+        section = self.get_section(position)
+        edge_id = section.edge_id
+        if edge_id is None:
+            edge_id = self.sections.index(section) + 1
+
+        offset = position - section.start
+        if section.direction_code < 0:
+            offset = section.end - position
+
+        return {
+            "edge_id": edge_id,
+            "section_id": section.section_id,
+            "edge_offset_m": max(0.0, offset),
+            "direction_code": section.direction_code,
+        }

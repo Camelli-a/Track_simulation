@@ -152,6 +152,42 @@ class DashboardStateStore:
         self.update_train(str(vehicle_id), normalized)
         return str(vehicle_id)
 
+    def replace_trains(self, trains: Iterable[Dict[str, Any]]) -> None:
+        """Replace dashboard train snapshots with a managed TrainManager list."""
+
+        now = time.time()
+        snapshots: Dict[str, TrainSnapshot] = {}
+        for item in trains:
+            raw_data = dict(item)
+            normalized = normalize_train(item)
+            vehicle_id = normalized.get("vehicle_id")
+            if not vehicle_id:
+                continue
+            normalized.setdefault("vehicle_id", vehicle_id)
+            normalized.setdefault("updated_at", now)
+            normalized.setdefault("raw_data", raw_data)
+            normalized.setdefault("is_running", bool(normalized.get("speed", 0.0)))
+            snapshots[vehicle_id] = TrainSnapshot(**normalized)
+
+        with self._lock:
+            self._trains = snapshots
+            active_ids = set(snapshots)
+            self._driver_inputs = {
+                vehicle_id: item
+                for vehicle_id, item in self._driver_inputs.items()
+                if vehicle_id in active_ids
+            }
+            self._ato_commands = {
+                vehicle_id: item
+                for vehicle_id, item in self._ato_commands.items()
+                if vehicle_id in active_ids
+            }
+            self._ma_limits = {
+                vehicle_id: item
+                for vehicle_id, item in self._ma_limits.items()
+                if vehicle_id in active_ids
+            }
+
     def update_ma_limits(self, ma_limits: Iterable[Dict[str, Any]]) -> None:
         now = time.time()
         with self._lock:

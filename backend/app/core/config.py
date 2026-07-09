@@ -11,15 +11,19 @@ class Settings(BaseSettings):
     # Data source: mock | udp | zmq
     DATA_SOURCE: str = "mock"
 
-    # UDP
+    # UDP compatibility settings.
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 9000
 
-    # ZMQ broker addresses. Subscribers connect to FRONTEND; publishers connect to BACKEND.
+    # Driver desk PLC over TCP.
+    PLC_HOST: str = "192.168.100.123"
+    PLC_PORT: int = 8001
+
+    # ZMQ broker addresses.
     ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
     ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"
 
-    # Compatibility for older modules.
+    # Compatibility aliases for older modules.
     ZMQ_ADDRESS: str = "tcp://127.0.0.1:5555"
     zmq_address: str = "tcp://127.0.0.1:5555"
 
