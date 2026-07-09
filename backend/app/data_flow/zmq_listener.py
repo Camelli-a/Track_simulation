@@ -141,15 +141,23 @@ class ZmqDashboardListener:
 
     def dispatch(self, message_type: str, data: Dict[str, Any]) -> None:
         if message_type == "train_state":
-            vehicle_id = data.get("vehicle_id") or data.get("train_id") or data.get("id")
+            vehicle_id = self._vehicle_id(data)
             if vehicle_id:
                 state_store.update_train(vehicle_id, data)
+        elif message_type in {"vehicle_register", "vehicle_spawn", "add_vehicle", "set_train_state"}:
+            vehicles = data.get("vehicles")
+            if isinstance(vehicles, list):
+                for item in vehicles:
+                    if isinstance(item, dict):
+                        state_store.register_vehicle(item)
+            else:
+                state_store.register_vehicle(data)
         elif message_type == "driver_input":
-            vehicle_id = data.get("vehicle_id") or data.get("train_id") or data.get("id")
+            vehicle_id = self._vehicle_id(data)
             if vehicle_id:
                 state_store.update_driver_input(vehicle_id, data)
         elif message_type == "ato_command":
-            vehicle_id = data.get("vehicle_id") or data.get("train_id") or data.get("id")
+            vehicle_id = self._vehicle_id(data)
             if vehicle_id:
                 state_store.update_ato_command(vehicle_id, data)
         elif message_type == "signal_state":
@@ -161,6 +169,22 @@ class ZmqDashboardListener:
             state_store.update_ma_limits(ma_limits or [])
         elif message_type == "track_info":
             state_store.update_track_info(data)
+        elif message_type in {"route_request", "route_apply", "route_application"}:
+            route_requests = data.get("route_requests")
+            if isinstance(route_requests, list):
+                for item in route_requests:
+                    if isinstance(item, dict):
+                        state_store.update_route_request(item)
+            else:
+                state_store.update_route_request(data)
+        elif message_type == "route_result":
+            route_results = data.get("route_results")
+            if isinstance(route_results, list):
+                for item in route_results:
+                    if isinstance(item, dict):
+                        state_store.update_route_result(item)
+            else:
+                state_store.update_route_result(data)
         elif message_type == "power_state":
             state_store.update_power(data)
         elif message_type == "comm_state":
@@ -169,6 +193,11 @@ class ZmqDashboardListener:
             state_store.add_alarm(data)
         else:
             logger.warning("Unknown dashboard message type: %s", message_type)
+
+    @staticmethod
+    def _vehicle_id(data: Dict[str, Any]) -> str | None:
+        value = data.get("vehicle_id") or data.get("train_id") or data.get("id") or data.get("vehicleId")
+        return str(value) if value else None
 
 
 zmq_dashboard_listener = ZmqDashboardListener()

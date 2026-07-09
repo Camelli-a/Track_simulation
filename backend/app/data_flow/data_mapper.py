@@ -13,6 +13,7 @@ TRAIN_FIELD_MAPPING = {
     "kilometerPost": "position",
     "pos": "position",
     "acc": "acceleration",
+    "trainLength": "train_length",
     "ctrlMode": "mode",
     "eb": "emergency_brake",
     "routeId": "route_id",
@@ -121,6 +122,22 @@ POWER_FIELD_MAPPING = {
     "substation": "substation_id",
 }
 
+ROUTE_REQUEST_FIELD_MAPPING = {
+    "id": "request_id",
+    "requestId": "request_id",
+    "train_id": "vehicle_id",
+    "vehicleId": "vehicle_id",
+    "routeId": "route_id",
+    "originSectionId": "origin_section_id",
+    "fromSection": "origin_section_id",
+    "destinationSectionId": "destination_section_id",
+    "toSection": "destination_section_id",
+    "startPosition": "start_position",
+    "fromPosition": "start_position",
+    "endPosition": "end_position",
+    "toPosition": "end_position",
+}
+
 
 def normalize_fields(data: Dict[str, Any], mapping: Dict[str, str]) -> Dict[str, Any]:
     """Return a copy with known aliases converted to protocol field names."""
@@ -181,3 +198,7 @@ def normalize_switch(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def normalize_power(data: Dict[str, Any]) -> Dict[str, Any]:
     return normalize_fields(data, POWER_FIELD_MAPPING)
+
+
+def normalize_route_request(data: Dict[str, Any]) -> Dict[str, Any]:
+    return normalize_fields(data, ROUTE_REQUEST_FIELD_MAPPING)
