@@ -406,7 +406,7 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
 
 当前包含：
 
-- demo 停车目标点 `STOP_TARGETS`
+- 线路静态配置提供的 `STOP_TARGETS`
 - 简化停车曲线 `v = sqrt(2 * a * distance)`
 - 基础 `PIDController`
 - ATO 状态：`cruise` / `approach_station` / `braking_to_stop` / `creep` / `holding` / `degraded`
@@ -428,6 +428,11 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
       "target_position": 1200.0,
       "distance_to_target": 150.0,
       "station_id": "ST-01",
+      "target_id": "STOP-ST-001-PF-001-R-MAIN",
+      "station_name": "GGZ",
+      "platform_id": "PF-001",
+      "platform_name": "GGZ-P01",
+      "stop_target_source": "teacher_platform_table",
       "traction_level": 0,
       "brake_level": 2,
       "holding_brake": false,
@@ -442,6 +447,8 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
   ]
 }
 ```
+
+`STOP_TARGETS` 当前由 `signal_track_config.py` 统一提供，优先来源为老师 Excel 中的车站表 / 站台表。第一版按站台中心公里标生成停车点，并用 `route.start <= platform.position <= route.end` 将站台与进路关联；无法匹配时后续可 fallback 到 `route.end` / `end_signal_id`。ATO 使用 `STOP_TARGETS` 计算停车曲线，不直接更新车辆位置；停车精度后续由 `stop_result` 评价。
 
 `target_speed` 始终不超过 `safe_speed_limit`。车辆模块后续订阅 `ato_command` 后自行执行动力学；本模块不替代车辆模型，也不做真实深度学习训练。
 

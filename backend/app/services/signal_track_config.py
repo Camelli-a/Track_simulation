@@ -42,6 +42,376 @@ STATIC_SPEED_LIMITS = [
     },
 ]
 
+STATIONS = [
+    {
+        "station_id": "ST-001",
+        "station_name": "GGZ",
+        "source_index": 1,
+        "source_name": "GGZ",
+        "position": 313.0,
+        "platform_ids": ["PF-001", "PF-002"],
+    },
+    {
+        "station_id": "ST-002",
+        "station_name": "FSP",
+        "source_index": 2,
+        "source_name": "FSP",
+        "position": 1660.52,
+        "platform_ids": ["PF-003", "PF-004"],
+    },
+    {
+        "station_id": "ST-003",
+        "station_name": "KYL",
+        "source_index": 3,
+        "source_name": "KYL",
+        "position": 2448.61,
+        "platform_ids": ["PF-005", "PF-006"],
+    },
+    {
+        "station_id": "ST-004",
+        "station_name": "FTN",
+        "source_index": 4,
+        "source_name": "FTN",
+        "position": 3429.32,
+        "platform_ids": ["PF-007", "PF-008"],
+    },
+    {
+        "station_id": "ST-005",
+        "station_name": "FTD",
+        "source_index": 5,
+        "source_name": "FTD",
+        "position": 5014.46,
+        "platform_ids": ["PF-009", "PF-010"],
+    },
+    {
+        "station_id": "ST-006",
+        "station_name": "QLZ",
+        "source_index": 6,
+        "source_name": "QLZ",
+        "position": 6339.9,
+        "platform_ids": ["PF-011", "PF-012"],
+    },
+    {
+        "station_id": "ST-007",
+        "station_name": "LLQ",
+        "source_index": 7,
+        "source_name": "LLQ",
+        "position": 8118.83,
+        "platform_ids": ["PF-013", "PF-014"],
+    },
+    {
+        "station_id": "ST-008",
+        "station_name": "LLE",
+        "source_index": 8,
+        "source_name": "LLE",
+        "position": 9429.16,
+        "platform_ids": ["PF-015", "PF-016"],
+    },
+    {
+        "station_id": "ST-009",
+        "station_name": "BWR",
+        "source_index": 9,
+        "source_name": "BWR",
+        "position": 10598.74,
+        "platform_ids": ["PF-017", "PF-018"],
+    },
+    {
+        "station_id": "ST-010",
+        "station_name": "JBG",
+        "source_index": 10,
+        "source_name": "JBG",
+        "position": 11996.97,
+        "platform_ids": ["PF-019", "PF-020"],
+    },
+    {
+        "station_id": "ST-011",
+        "station_name": "BDZ",
+        "source_index": 11,
+        "source_name": "BDZ",
+        "position": 13906.77,
+        "platform_ids": ["PF-021", "PF-022"],
+    },
+    {
+        "station_id": "ST-012",
+        "station_name": "BQS",
+        "source_index": 12,
+        "source_name": "BQS",
+        "position": 14954.01,
+        "platform_ids": ["PF-023", "PF-024"],
+    },
+    {
+        "station_id": "ST-013",
+        "station_name": "GTG",
+        "source_index": 13,
+        "source_name": "GTG",
+        "position": 16048.92,
+        "platform_ids": ["PF-025", "PF-026"],
+    },
+]
+
+PLATFORMS = [
+    {
+        "platform_id": "PF-001",
+        "station_id": "ST-001",
+        "platform_name": "GGZ-P01",
+        "direction": "up",
+        "position": 313.0,
+        "source_index": 1,
+        "source_name": "K0+313.000",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-002",
+        "station_id": "ST-001",
+        "platform_name": "GGZ-P02",
+        "direction": "down",
+        "position": 313.0,
+        "source_index": 2,
+        "source_name": "K0+313.000",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-003",
+        "station_id": "ST-002",
+        "platform_name": "FSP-P03",
+        "direction": "down",
+        "position": 1660.52,
+        "source_index": 3,
+        "source_name": "K1+660.520",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-004",
+        "station_id": "ST-002",
+        "platform_name": "FSP-P04",
+        "direction": "up",
+        "position": 1660.52,
+        "source_index": 4,
+        "source_name": "K1+660.520",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-005",
+        "station_id": "ST-003",
+        "platform_name": "KYL-P05",
+        "direction": "down",
+        "position": 2448.61,
+        "source_index": 5,
+        "source_name": "K2+448.610",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-006",
+        "station_id": "ST-003",
+        "platform_name": "KYL-P06",
+        "direction": "up",
+        "position": 2448.61,
+        "source_index": 6,
+        "source_name": "K2+448.610",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-007",
+        "station_id": "ST-004",
+        "platform_name": "FTN-P07",
+        "direction": "down",
+        "position": 3429.32,
+        "source_index": 7,
+        "source_name": "K3+429.320",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-008",
+        "station_id": "ST-004",
+        "platform_name": "FTN-P08",
+        "direction": "up",
+        "position": 3429.32,
+        "source_index": 8,
+        "source_name": "K3+429.320",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-009",
+        "station_id": "ST-005",
+        "platform_name": "FTD-P09",
+        "direction": "down",
+        "position": 5014.46,
+        "source_index": 9,
+        "source_name": "K5+014.460",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-010",
+        "station_id": "ST-005",
+        "platform_name": "FTD-P10",
+        "direction": "up",
+        "position": 5014.46,
+        "source_index": 10,
+        "source_name": "K5+014.460",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-011",
+        "station_id": "ST-006",
+        "platform_name": "QLZ-P11",
+        "direction": "down",
+        "position": 6339.9,
+        "source_index": 11,
+        "source_name": "K6+339.900",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-012",
+        "station_id": "ST-006",
+        "platform_name": "QLZ-P12",
+        "direction": "up",
+        "position": 6339.9,
+        "source_index": 12,
+        "source_name": "K6+339.900",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-013",
+        "station_id": "ST-007",
+        "platform_name": "LLQ-P13",
+        "direction": "up",
+        "position": 8118.83,
+        "source_index": 13,
+        "source_name": "K8+118.830",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-014",
+        "station_id": "ST-007",
+        "platform_name": "LLQ-P14",
+        "direction": "down",
+        "position": 8118.83,
+        "source_index": 14,
+        "source_name": "K8+118.830",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-015",
+        "station_id": "ST-008",
+        "platform_name": "LLE-P15",
+        "direction": "down",
+        "position": 9429.16,
+        "source_index": 15,
+        "source_name": "K9+429.160",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-016",
+        "station_id": "ST-008",
+        "platform_name": "LLE-P16",
+        "direction": "up",
+        "position": 9429.16,
+        "source_index": 16,
+        "source_name": "K9+429.160",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-017",
+        "station_id": "ST-009",
+        "platform_name": "BWR-P17",
+        "direction": "down",
+        "position": 10598.74,
+        "source_index": 17,
+        "source_name": "K10+598.740",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-018",
+        "station_id": "ST-009",
+        "platform_name": "BWR-P18",
+        "direction": "up",
+        "position": 10598.74,
+        "source_index": 18,
+        "source_name": "K10+598.740",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-019",
+        "station_id": "ST-010",
+        "platform_name": "JBG-P19",
+        "direction": "down",
+        "position": 11996.97,
+        "source_index": 19,
+        "source_name": "K11+996.970",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-020",
+        "station_id": "ST-010",
+        "platform_name": "JBG-P20",
+        "direction": "up",
+        "position": 11996.97,
+        "source_index": 20,
+        "source_name": "K11+996.970",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-021",
+        "station_id": "ST-011",
+        "platform_name": "BDZ-P21",
+        "direction": "down",
+        "position": 13906.77,
+        "source_index": 21,
+        "source_name": "K13+906.770",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-022",
+        "station_id": "ST-011",
+        "platform_name": "BDZ-P22",
+        "direction": "up",
+        "position": 13906.77,
+        "source_index": 22,
+        "source_name": "K13+906.770",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-023",
+        "station_id": "ST-012",
+        "platform_name": "BQS-P23",
+        "direction": "down",
+        "position": 14954.01,
+        "source_index": 23,
+        "source_name": "K14+954.010",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-024",
+        "station_id": "ST-012",
+        "platform_name": "BQS-P24",
+        "direction": "up",
+        "position": 14954.01,
+        "source_index": 24,
+        "source_name": "K14+954.010",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-025",
+        "station_id": "ST-013",
+        "platform_name": "GTG-P25",
+        "direction": "up",
+        "position": 16048.92,
+        "source_index": 25,
+        "source_name": "K16+048.920",
+        "source": "teacher_platform_table",
+    },
+    {
+        "platform_id": "PF-026",
+        "station_id": "ST-013",
+        "platform_name": "GTG-P26",
+        "direction": "down",
+        "position": 16048.92,
+        "source_index": 26,
+        "source_name": "K16+048.920",
+        "source": "teacher_platform_table",
+    },
+]
+
 # Extracted from the axle-counter section sheet plus Seg lengths.
 SECTIONS = [{'section_id': 'JZ1',
   'source_index': 1,
@@ -7093,3 +7463,81 @@ ROUTES = {'XQ1-Z5': {'route_id': 'XQ1-Z5',
               'end': 1800.0,
               'speed_limit': 45.0,
               'required_switches': [{'switch_id': 'SW-01', 'required_position': 'reverse'}]}}
+
+
+def _target_id_for(platform: dict, route_id: str) -> str:
+    safe_route_id = "".join(char if char.isalnum() else "-" for char in route_id).strip("-")
+    return f"STOP-{platform['station_id']}-{platform['platform_id']}-{safe_route_id}"
+
+
+def _build_stop_targets() -> list[dict]:
+    station_by_id = {station["station_id"]: station for station in STATIONS}
+    stop_targets = []
+    seen = set()
+    for platform in PLATFORMS:
+        matching_routes = []
+        for route_id, route in ROUTES.items():
+            if route["start"] <= platform["position"] <= route["end"]:
+                matching_routes.append(
+                    (
+                        abs(route["end"] - platform["position"]),
+                        route_id,
+                    )
+                )
+
+        for _, route_id in sorted(matching_routes)[:6]:
+            key = (platform["platform_id"], route_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            station = station_by_id.get(platform["station_id"], {})
+            stop_targets.append(
+                {
+                    "target_id": _target_id_for(platform, route_id),
+                    "station_id": platform["station_id"],
+                    "station_name": station.get("station_name"),
+                    "platform_id": platform["platform_id"],
+                    "platform_name": platform["platform_name"],
+                    "route_id": route_id,
+                    "position": platform["position"],
+                    "window_before": 0.5,
+                    "window_after": 0.5,
+                    "approach_distance": 600.0,
+                    "direction": platform["direction"],
+                    "source": "teacher_platform_table",
+                    "source_index": platform["source_index"],
+                    "source_name": platform["source_name"],
+                    "fallback_reason": "matched_by_route_position_range",
+                }
+            )
+
+    for route_id in (DEFAULT_ROUTE_ID, "R_BRANCH"):
+        if route_id not in ROUTES or any(target["route_id"] == route_id for target in stop_targets):
+            continue
+        route = ROUTES[route_id]
+        platform = min(PLATFORMS, key=lambda item: abs(item["position"] - route["end"]))
+        station = station_by_id.get(platform["station_id"], {})
+        stop_targets.append(
+            {
+                "target_id": _target_id_for(platform, route_id),
+                "station_id": platform["station_id"],
+                "station_name": station.get("station_name"),
+                "platform_id": platform["platform_id"],
+                "platform_name": platform["platform_name"],
+                "route_id": route_id,
+                "position": platform["position"],
+                "window_before": 0.5,
+                "window_after": 0.5,
+                "approach_distance": 600.0,
+                "direction": platform["direction"],
+                "source": "teacher_platform_table",
+                "source_index": platform["source_index"],
+                "source_name": platform["source_name"],
+                "fallback_reason": "nearest_platform_to_demo_route_end",
+            }
+        )
+
+    return stop_targets
+
+
+STOP_TARGETS = _build_stop_targets()

@@ -14,6 +14,24 @@ from app.services.signal_ato_controller import (  # noqa: E402
     control_value_to_levels,
     find_next_stop_target,
 )
+from app.services.signal_track_config import STOP_TARGETS as CONFIG_STOP_TARGETS  # noqa: E402
+
+
+DEMO_STOP_TARGETS = [
+    {
+        "target_id": "STOP-TEST",
+        "station_id": "ST-TEST",
+        "station_name": "Test Station",
+        "platform_id": "PF-TEST",
+        "platform_name": "Test Platform",
+        "route_id": "R_MAIN",
+        "position": 1200.0,
+        "window_before": 0.5,
+        "window_after": 0.5,
+        "approach_distance": 600.0,
+        "source": "test_fixture",
+    }
+]
 
 
 def _train_state(position=300.0, speed=40.0, route_id="R_MAIN"):
@@ -34,6 +52,17 @@ def _ma_limit(speed_limit=60.0, permission="allow", reason="route_end"):
         "reason": reason,
         "speed_limit_reason": "static_limit",
     }
+
+
+def _controller_with_demo_stop():
+    return AtoController(stop_targets=DEMO_STOP_TARGETS)
+
+
+def test_default_controller_uses_config_stop_targets():
+    controller = AtoController()
+
+    assert controller.stop_targets is CONFIG_STOP_TARGETS
+    assert CONFIG_STOP_TARGETS
 
 
 def test_find_next_stop_target_returns_nearest_forward_target():
@@ -101,7 +130,7 @@ def test_far_from_stop_target_cruise():
 
 
 def test_approaching_station_target_speed_not_exceed_safe_limit():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=900.0, speed=20.0),
@@ -113,7 +142,7 @@ def test_approaching_station_target_speed_not_exceed_safe_limit():
 
 
 def test_braking_to_stop_when_current_speed_above_curve():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=1190.0, speed=80.0),
@@ -125,7 +154,7 @@ def test_braking_to_stop_when_current_speed_above_curve():
 
 
 def test_creep_near_target():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=1197.0, speed=2.0),
@@ -137,7 +166,7 @@ def test_creep_near_target():
 
 
 def test_holding_inside_stop_window_low_speed():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=1200.2, speed=0.2),
@@ -149,7 +178,7 @@ def test_holding_inside_stop_window_low_speed():
 
 
 def test_overshoot_outputs_degraded():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=1201.0, speed=5.0),
@@ -202,7 +231,7 @@ def test_pid_output_limited():
 
 
 def test_target_speed_never_exceeds_safe_speed_limit():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     for position in (100.0, 900.0, 1197.0):
         command = controller.build_ato_command_for_train(
@@ -309,7 +338,7 @@ def test_comfort_brake_preferred_in_normal_approach():
 
 
 def test_degraded_bypasses_optimizer():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=900.0, speed=20.0),
@@ -321,7 +350,7 @@ def test_degraded_bypasses_optimizer():
 
 
 def test_holding_bypasses_optimizer():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=1200.2, speed=0.2),
@@ -333,7 +362,7 @@ def test_holding_bypasses_optimizer():
 
 
 def test_optimized_target_speed_never_exceeds_safe_speed_limit():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     for position in (900.0, 1190.0, 1197.0):
         command = controller.build_ato_command_for_train(
@@ -344,7 +373,7 @@ def test_optimized_target_speed_never_exceeds_safe_speed_limit():
 
 
 def test_ato_command_includes_strategy_score_fields():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=900.0, speed=20.0),
@@ -357,7 +386,7 @@ def test_ato_command_includes_strategy_score_fields():
 
 
 def test_strategy_scores_has_no_type_or_timestamp():
-    controller = AtoController()
+    controller = _controller_with_demo_stop()
 
     command = controller.build_ato_command_for_train(
         _train_state(position=900.0, speed=20.0),
@@ -367,3 +396,18 @@ def test_strategy_scores_has_no_type_or_timestamp():
     for strategy_score in command["strategy_scores"]:
         assert "type" not in strategy_score
         assert "timestamp" not in strategy_score
+
+
+def test_ato_command_includes_stop_target_metadata():
+    controller = _controller_with_demo_stop()
+
+    command = controller.build_ato_command_for_train(
+        _train_state(position=900.0, speed=20.0),
+        _ma_limit(speed_limit=40.0),
+    )
+
+    assert command["target_id"] == "STOP-TEST"
+    assert command["station_name"] == "Test Station"
+    assert command["platform_id"] == "PF-TEST"
+    assert command["platform_name"] == "Test Platform"
+    assert command["stop_target_source"] == "test_fixture"

@@ -448,6 +448,11 @@ ATO/车辆控制模块应把 `ma_state.speed_limit` 作为安全速度上限，�
         "target_position": 1200.0,
         "distance_to_target": 150.0,
         "station_id": "ST-01",
+        "target_id": "STOP-ST-001-PF-001-R-MAIN",
+        "station_name": "GGZ",
+        "platform_id": "PF-001",
+        "platform_name": "GGZ-P01",
+        "stop_target_source": "teacher_platform_table",
         "stop_window": {
           "lower": 1199.5,
           "upper": 1200.5
@@ -470,6 +475,8 @@ ATO/车辆控制模块应把 `ma_state.speed_limit` 作为安全速度上限，�
 
 ATO 第一版只输出目标速度、停车曲线和牵引/制动级位建议，不直接更新车辆速度、位置、加速度。车辆模块订阅 `ato_command` 后自行执行动力学。`target_speed` 必须始终小于等于 `safe_speed_limit`，其中 `safe_speed_limit` 来自 `ma_state.speed_limit`。
 
+`STOP_TARGETS` 由 `signal_track_config.py` 的线路静态配置提供。当前优先使用老师 Excel 车站表 / 站台表抽取出的站台中心公里标，并按 `route.start <= platform.position <= route.end` 关联到进路；后续无法匹配的进路可 fallback 到 `route.end` / `end_signal_id`。业务 `data` 内仍不包含 `type` / `timestamp`。
+
 ATO 优化模型采用可解释的多目标评分方法，不引入 sklearn / PyTorch / TensorFlow，也不做深度学习训练。优化器只在 `approach_station` / `braking_to_stop` / `creep` 等状态中选择目标速度策略，PID 仍负责跟踪目标速度并输出牵引/制动级位。
 
 策略字段：
@@ -477,6 +484,7 @@ ATO 优化模型采用可解释的多目标评分方法，不引入 sklearn / Py
 - `selected_strategy`：当前选中的策略，例如 `conservative_brake` / `comfort_brake` / `energy_saving` / `precise_stop` / `safety_stop` / `holding`。
 - `score`：选中策略评分，非优化状态可为 `null`。
 - `strategy_scores`：候选策略评分列表，每项包含 `strategy`、`target_speed`、`score`。
+- `target_id` / `station_name` / `platform_id` / `platform_name` / `stop_target_source`：停车目标来源与站台元数据。
 
 优化器永远不能突破 `ma_state.speed_limit`：`target_speed <= safe_speed_limit`。
 

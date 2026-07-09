@@ -1,27 +1,7 @@
 from copy import deepcopy
 import math
 
-
-STOP_TARGETS = [
-    {
-        "target_id": "STOP-ST-01",
-        "station_id": "ST-01",
-        "route_id": "R_MAIN",
-        "position": 1200.0,
-        "window_before": 0.5,
-        "window_after": 0.5,
-        "approach_distance": 600.0,
-    },
-    {
-        "target_id": "STOP-ST-02",
-        "station_id": "ST-02",
-        "route_id": "R_BRANCH",
-        "position": 1800.0,
-        "window_before": 0.5,
-        "window_after": 0.5,
-        "approach_distance": 600.0,
-    },
-]
+from app.services.signal_track_config import STOP_TARGETS
 
 
 def kmh_to_mps(speed_kmh: float) -> float:
@@ -591,7 +571,12 @@ class AtoController:
             "current_speed": round(_to_float(train_state.get("speed"), 0.0), 1),
             "target_position": target_position,
             "distance_to_target": round(distance_to_target, 3) if distance_to_target is not None else None,
+            "target_id": stop_target.get("target_id") if stop_target else None,
             "station_id": stop_target.get("station_id") if stop_target else None,
+            "station_name": stop_target.get("station_name") if stop_target else None,
+            "platform_id": stop_target.get("platform_id") if stop_target else None,
+            "platform_name": stop_target.get("platform_name") if stop_target else None,
+            "stop_target_source": stop_target.get("source") if stop_target else None,
             "stop_window": stop_window,
             "traction_level": traction_level,
             "brake_level": brake_level,
