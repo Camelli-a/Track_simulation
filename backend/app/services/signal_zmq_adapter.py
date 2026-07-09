@@ -3,6 +3,7 @@ import threading
 import time
 
 from app.communication.message_bus import MessageBus
+from app.services.signal_ato_controller import AtoController
 from app.services.signal_control import calculate_signal_snapshot
 from app.services.signal_route_lifecycle import RouteLifecycleManager
 
@@ -21,6 +22,7 @@ class SignalZmqAdapter:
         publish_on_update=True,
         time_func=time.time,
         route_lifecycle_manager=None,
+        ato_controller=None,
     ):
         self.bus = bus or MessageBus()
         self.publish_interval_seconds = publish_interval_seconds
@@ -30,6 +32,7 @@ class SignalZmqAdapter:
         self.route_lifecycle_manager = route_lifecycle_manager or RouteLifecycleManager(
             time_func=self.time_func
         )
+        self.ato_controller = ato_controller or AtoController()
         self.train_states_by_id = {}
         self.train_last_update_at = {}
         self.route_requests = []
@@ -67,6 +70,13 @@ class SignalZmqAdapter:
         }
         if "train_length" in data:
             train_state["train_length"] = data["train_length"]
+        if "fault_speed_limit" in data:
+            try:
+                train_state["fault_speed_limit"] = float(data["fault_speed_limit"])
+            except (TypeError, ValueError):
+                train_state["fault_speed_limit"] = data["fault_speed_limit"]
+        if "emergency_brake" in data:
+            train_state["emergency_brake"] = self._to_bool(data["emergency_brake"])
 
         vehicle_id = train_state["vehicle_id"]
         with self.lock:
@@ -142,6 +152,16 @@ class SignalZmqAdapter:
             "ma_state",
             {
                 "ma_limits": snapshot["ma_limits"],
+            },
+        )
+        self.bus.publish(
+            "ato_command",
+            {
+                "commands": self.ato_controller.build_ato_commands(
+                    train_states,
+                    snapshot.get("ma_limits", []),
+                    snapshot.get("route_states", []),
+                ),
             },
         )
 
@@ -289,3 +309,8 @@ class SignalZmqAdapter:
                 },
             },
         )
+
+    def _to_bool(self, value) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)

@@ -17,6 +17,7 @@ from app.services.signal_hardware_adapter import (  # noqa: E402
     map_switch_to_hardware_code,
     normalize_hardware_train_state,
 )
+from app.services.signal_control import calculate_signal_snapshot  # noqa: E402
 
 
 def test_normalize_hardware_train_state_converts_704_fields():
@@ -60,6 +61,26 @@ def test_normalize_hardware_train_state_maps_down_direction():
     assert train_state["vehicle_id"] == "TRAIN-002"
     assert train_state["direction"] == "down"
     assert train_state["direction_code"] == 0xAA
+
+
+def test_hardware_normalized_fault_speed_limit_participates():
+    train_state = normalize_hardware_train_state(
+        {
+            "train_id": "1",
+            "speed_cm_s": 1000,
+            "distance_cm": 62000,
+            "direction_code": 0x55,
+            "fault_speed_limit_cm_s": 500,
+        }
+    )
+
+    snapshot = calculate_signal_snapshot([train_state])
+    ma_limit = snapshot["ma_limits"][0]
+
+    assert train_state["fault_speed_limit"] == 18.0
+    assert ma_limit["fault_speed_limit"] == 18.0
+    assert ma_limit["speed_limit"] == 18.0
+    assert ma_limit["speed_limit_reason"] == "fault_limit"
 
 
 def test_map_switch_position_to_hardware_code():

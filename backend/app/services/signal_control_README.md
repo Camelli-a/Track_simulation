@@ -159,7 +159,7 @@ ma_state
 - `section.start` / `section.end` 当前是按表格顺序累计得到的一维近似坐标。
 - `signal.position` 当前也是累计坐标近似。
 - `required_switches` 第一版仍以人工配置为主。
-- `speed_limit` 第一版统一默认，尚未接静态限速表。
+- `STATIC_SPEED_LIMITS` 第一版已接入 demo 静态限速配置，后续可替换为老师 Excel 静态限速表。
 - `side_speed_limit` 单位后续需要结合课程数据定义确认。
 
 ## 6. MA 计算逻辑
@@ -370,3 +370,73 @@ ZMQ 包装格式由 `MessageBus` 自动生成：
 - 自动推断进路 `required_switches`。
 - 增加完整进路锁闭 / 解锁生命周期。
 - 与车辆 ATP / ATO 模块联动。
+
+## 静态限速第一版接入
+
+`signal_track_config.py` 当前新增了第一版 demo 静态限速表 `STATIC_SPEED_LIMITS`：
+
+- `SL-001`：`0.0m <= position < 500.0m`，`speed_limit = 60.0 km/h`
+- `SL-002`：`500.0m <= position < 2500.0m`，`speed_limit = 80.0 km/h`
+
+所有速度单位统一为 `km/h`，`start` / `end` 使用当前系统的一维 position 坐标。后续可以从老师 Excel 静态限速表生成真实配置。
+
+`ma_state.ma_limits[]` 新增以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `static_speed_limit` | 当前 position 命中的静态线路限速 |
+| `static_speed_limit_id` | 当前命中的静态限速区间 ID |
+| `fault_speed_limit` | train_state 或 704 映射输入中的故障限速 |
+| `speed_limit_reason` | 当前主导限速原因 |
+
+最终 `speed_limit` 是安全速度上限，综合：
+
+- `route_speed_limit`
+- `static_speed_limit`
+- `fault_speed_limit`
+- `braking_curve_speed_limit`
+
+当 `emergency_brake=True` 时，信号输出会直接进入 `stop / red / speed_limit=0`，`speed_limit_reason = emergency_brake`。
+
+ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全速度上限，并在该上限内做牵引、惰行和制动控制；不应绕过信号模块重新判断联锁安全。
+
+## ATO 基础模块与 ato_command
+
+第一版 ATO 模块位于 `signal_ato_controller.py`，职责是在 `ma_state.speed_limit` 安全上限内生成智能驾驶建议，不直接更新车辆动力学。
+
+当前包含：
+
+- demo 停车目标点 `STOP_TARGETS`
+- 简化停车曲线 `v = sqrt(2 * a * distance)`
+- 基础 `PIDController`
+- ATO 状态：`cruise` / `approach_station` / `braking_to_stop` / `creep` / `holding` / `degraded`
+- ZMQ topic：`ato_command`
+
+`ato_command.data` 结构：
+
+```json
+{
+  "commands": [
+    {
+      "vehicle_id": "TRAIN-001",
+      "control_mode": "ATO",
+      "ato_state": "braking_to_stop",
+      "target_speed": 18.5,
+      "safe_speed_limit": 40.0,
+      "stop_curve_speed_limit": 18.5,
+      "current_speed": 35.0,
+      "target_position": 1200.0,
+      "distance_to_target": 150.0,
+      "station_id": "ST-01",
+      "traction_level": 0,
+      "brake_level": 2,
+      "holding_brake": false,
+      "selected_strategy": "pid_basic",
+      "score": null,
+      "reason": "stop_curve_braking"
+    }
+  ]
+}
+```
+
+`target_speed` 始终不超过 `safe_speed_limit`。车辆模块后续订阅 `ato_command` 后自行执行动力学；本模块不替代车辆模型，也不做真实深度学习训练。

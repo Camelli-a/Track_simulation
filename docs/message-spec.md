@@ -225,10 +225,14 @@
         "front_protection_point": 455.0,
         "current_speed": 40.0,
         "route_speed_limit": 80.0,
+        "static_speed_limit": 60.0,
+        "static_speed_limit_id": "SL-001",
+        "fault_speed_limit": null,
         "required_stop_distance": 108.4,
         "emergency_stop_distance": 98.1,
         "warning_distance": 158.4,
         "braking_curve_speed_limit": 51.8,
+        "speed_limit_reason": "braking_curve",
         "braking_model": "simplified_atp_braking_curve"
       }
     ]
@@ -396,5 +400,73 @@ bus = MessageBus()
 bus.start()
 bus.subscribe("train_state", on_train_state)
 ```
+
+## 静态限速与安全速度上限补充
+
+`ma_state.data.ma_limits[]` 现在会同时输出并合成以下限速来源：
+
+| 字段 | 类型 | 单位 | 说明 |
+|------|------|------|------|
+| `route_speed_limit` | float | km/h | 进路限速 |
+| `static_speed_limit` | float\|null | km/h | 静态线路限速 |
+| `static_speed_limit_id` | string\|null | - | 命中的静态限速区间 ID |
+| `fault_speed_limit` | float\|null | km/h | 车辆/系统故障限速 |
+| `braking_curve_speed_limit` | float\|null | km/h | ATP 制动曲线反推限速 |
+| `speed_limit` | float | km/h | 最终安全速度上限 |
+| `speed_limit_reason` | string | - | 主导限速原因 |
+
+`speed_limit_reason` 可取：
+
+- `route_limit`
+- `static_limit`
+- `fault_limit`
+- `braking_curve`
+- `stop`
+- `emergency_brake`
+- `no_valid_limit`
+
+ATO/车辆控制模块应把 `ma_state.speed_limit` 作为安全速度上限，在该上限内做牵引、惰行、制动控制；不应绕过信号模块重新判断联锁安全。
+
+## ATO command
+
+信号/ATO 模块会周期发布智能驾驶建议：
+
+```json
+{
+  "topic": "ato_command",
+  "timestamp": 1720000000.123,
+  "data": {
+    "commands": [
+      {
+        "vehicle_id": "TRAIN-001",
+        "control_mode": "ATO",
+        "ato_state": "braking_to_stop",
+        "target_speed": 18.5,
+        "safe_speed_limit": 40.0,
+        "stop_curve_speed_limit": 18.5,
+        "current_speed": 35.0,
+        "target_position": 1200.0,
+        "distance_to_target": 150.0,
+        "station_id": "ST-01",
+        "stop_window": {
+          "lower": 1199.5,
+          "upper": 1200.5
+        },
+        "traction_level": 0,
+        "brake_level": 2,
+        "holding_brake": false,
+        "selected_strategy": "pid_basic",
+        "score": null,
+        "reason": "stop_curve_braking",
+        "speed_limit_reason": "static_limit"
+      }
+    ]
+  }
+}
+```
+
+`MessageBus` 会自动包装 `topic` / `timestamp` / `data`，业务 `data` 内不要再放 `type` 或 `timestamp`。
+
+ATO 第一版只输出目标速度、停车曲线和牵引/制动级位建议，不直接更新车辆速度、位置、加速度。车辆模块订阅 `ato_command` 后自行执行动力学。`target_speed` 必须始终小于等于 `safe_speed_limit`，其中 `safe_speed_limit` 来自 `ma_state.speed_limit`。
 
 回调函数会在后台线程中执行，模块内部如维护共享状态，需要做好线程安全处理。

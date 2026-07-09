@@ -85,6 +85,34 @@ def test_on_train_state_records_last_update_at():
     assert adapter.train_states_by_id["TRAIN-001"] == _train_state()
 
 
+def test_train_state_preserves_fault_speed_limit_and_emergency_brake():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+
+    adapter.on_train_state(
+        "train_state",
+        {
+            "vehicle_id": "TRAIN-001",
+            "position": 620.0,
+            "speed": 20.0,
+            "route_id": "R_MAIN",
+            "fault_speed_limit": "30",
+            "emergency_brake": 1,
+        },
+    )
+
+    cached_state = adapter.train_states_by_id["TRAIN-001"]
+    assert cached_state["fault_speed_limit"] == 30.0
+    assert cached_state["emergency_brake"] is True
+
+    ma_limit = _published_data(fake_bus, "ma_state")[0]["ma_limits"][0]
+    assert ma_limit["fault_speed_limit"] == 30.0
+    assert ma_limit["permission"] == "stop"
+    assert ma_limit["signal_state"] == "red"
+    assert ma_limit["speed_limit"] == 0.0
+    assert ma_limit["speed_limit_reason"] == "emergency_brake"
+
+
 def test_publish_outputs_normal_when_train_state_not_stale():
     fake_bus = FakeBus()
     adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
@@ -93,11 +121,16 @@ def test_publish_outputs_normal_when_train_state_not_stale():
 
     adapter.publish_signal_outputs(now=100.0)
 
-    assert [topic for topic, _ in fake_bus.published] == ["signal_state", "ma_state"]
+    assert [topic for topic, _ in fake_bus.published] == [
+        "signal_state",
+        "ma_state",
+        "ato_command",
+    ]
     ma_limit = _published_data(fake_bus, "ma_state")[0]["ma_limits"][0]
     assert ma_limit["communication_lost"] is False
     assert ma_limit["stale_duration"] == 0.0
     assert not _published_data(fake_bus, "alarm_event")
+    assert _published_data(fake_bus, "ato_command")[0]["commands"]
 
 
 def test_stale_train_state_forces_stop_permission():
@@ -175,12 +208,16 @@ def test_message_data_has_no_double_wrapping_fields():
 
     signal_data = _published_data(fake_bus, "signal_state")[0]
     ma_data = _published_data(fake_bus, "ma_state")[0]
+    ato_data = _published_data(fake_bus, "ato_command")[0]
     alarm_data = _published_data(fake_bus, "alarm_event")[0]
 
     assert "type" not in signal_data
     assert "timestamp" not in signal_data
     assert "type" not in ma_data
     assert "timestamp" not in ma_data
+    assert "type" not in ato_data
+    assert "timestamp" not in ato_data
+    assert "commands" in ato_data
     assert "type" not in alarm_data
     assert "occurred_at" in alarm_data
 
@@ -363,6 +400,7 @@ def test_route_request_triggers_immediate_publish_when_enabled():
 
     assert "signal_state" in [topic for topic, _ in fake_bus.published]
     assert "ma_state" in [topic for topic, _ in fake_bus.published]
+    assert "ato_command" in [topic for topic, _ in fake_bus.published]
 
 
 def test_route_request_participates_in_snapshot_route_results():
@@ -501,11 +539,67 @@ def test_message_data_has_no_double_wrapping_after_route_request():
 
     signal_data = _published_data(fake_bus, "signal_state")[0]
     ma_data = _published_data(fake_bus, "ma_state")[0]
+    ato_data = _published_data(fake_bus, "ato_command")[0]
     alarm_data = _published_data(fake_bus, "alarm_event")[0]
 
     assert "type" not in signal_data
     assert "timestamp" not in signal_data
     assert "type" not in ma_data
     assert "timestamp" not in ma_data
+    assert "type" not in ato_data
+    assert "timestamp" not in ato_data
     assert "type" not in alarm_data
     assert "occurred_at" in alarm_data
+
+
+def test_adapter_publishes_ato_command():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+
+    adapter.on_train_state(
+        "train_state",
+        {
+            "vehicle_id": "TRAIN-001",
+            "position": 300.0,
+            "speed": 40.0,
+            "route_id": "R_MAIN",
+        },
+    )
+
+    ato_data = _published_data(fake_bus, "ato_command")[0]
+    assert "commands" in ato_data
+    assert ato_data["commands"][0]["vehicle_id"] == "TRAIN-001"
+    assert ato_data["commands"][0]["target_speed"] <= ato_data["commands"][0]["safe_speed_limit"]
+
+
+def test_ato_command_has_no_double_wrapping():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+
+    adapter.on_train_state(
+        "train_state",
+        {
+            "vehicle_id": "TRAIN-001",
+            "position": 300.0,
+            "speed": 40.0,
+            "route_id": "R_MAIN",
+        },
+    )
+
+    ato_data = _published_data(fake_bus, "ato_command")[0]
+    assert "type" not in ato_data
+    assert "timestamp" not in ato_data
+
+
+def test_timeout_fail_safe_makes_ato_degraded():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
+    adapter.train_states_by_id["TRAIN-001"] = _train_state()
+    adapter.train_last_update_at["TRAIN-001"] = 98.0
+
+    adapter.publish_signal_outputs(now=100.0)
+
+    command = _published_data(fake_bus, "ato_command")[0]["commands"][0]
+    assert command["ato_state"] == "degraded"
+    assert command["target_speed"] == 0.0
+    assert command["brake_level"] == 5
