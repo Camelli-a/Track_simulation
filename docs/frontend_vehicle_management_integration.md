@@ -40,6 +40,7 @@ backend/app/vehicle_sim/train_manager.py
 - `train_index` 范围：1~20。
 - 添加车辆时如果不指定 `train_index`，后端会自动分配最小空闲槽位。
 - 删除车辆会释放对应槽位。
+- 如果车辆算法模块收到 `set_train_state`，但对应车辆还不存在，会按 `vehicle_id` / `train_index` 自动补建车辆，再应用该状态；这样联调时状态消息先到也不会被静默忽略。
 
 ## 3. 前端按钮建议
 

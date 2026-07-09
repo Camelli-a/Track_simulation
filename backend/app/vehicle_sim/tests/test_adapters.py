@@ -113,3 +113,26 @@ def test_router_accepts_command_percent_input():
     assert train.current_traction_level == 2
     assert train.current_brake_level == 0
 
+
+def test_router_set_train_state_creates_missing_train():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+
+    result = router.handle(
+        {
+            "type": "set_train_state",
+            "vehicle_id": "TRAIN-011",
+            "position": 1200.0,
+            "speed": 36.0,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["created"] is True
+    assert result["vehicle_id"] == "TRAIN-011"
+    assert result["train_index"] == 11
+    train = manager.get_train("TRAIN-011")
+    assert train is not None
+    assert train.state.position == 1200.0
+    assert train.state.speed_kmh == 36.0
+

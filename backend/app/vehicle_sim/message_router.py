@@ -32,7 +32,7 @@ class MessageRouter:
         elif msg_type == "enable_fallback_ato":
             self._handle_enable_fallback_ato(message)
         elif msg_type == "set_train_state":
-            self._handle_set_train_state(message)
+            return self._handle_set_train_state(message)
         elif msg_type == "add_train":
             return self._handle_add_train(message)
         elif msg_type == "remove_train":
@@ -199,8 +199,22 @@ class MessageRouter:
     def _handle_set_train_state(self, msg: dict):
         vehicle_id = self._resolve_vehicle_id(msg)
         train = self.train_manager.get_train(vehicle_id)
+        created = False
         if train is None:
-            return
+            result = self.train_manager.add_train(
+                vehicle_id=vehicle_id,
+                slot=(
+                    None if msg.get("train_index") is None else int(msg["train_index"])
+                ),
+                position=float(msg.get("position", 0.0)),
+                line_id=msg.get("line_id", "LINE-1"),
+            )
+            if not result.get("ok"):
+                return result
+            train = self.train_manager.get_train(vehicle_id)
+            if train is None:
+                return result
+            created = True
 
         if "position" in msg:
             train.state.position = float(msg["position"])
@@ -213,6 +227,12 @@ class MessageRouter:
         if "direction_code" in msg:
             train.state.direction_code = int(msg["direction_code"])
         train.state.is_running = train.state.speed_ms > 0.0
+        return {
+            "ok": True,
+            "vehicle_id": train.state.vehicle_id,
+            "train_index": train.state.train_index,
+            "created": created,
+        }
 
     def _resolve_vehicle_id(self, msg: dict) -> str:
         if "vehicle_id" in msg:
