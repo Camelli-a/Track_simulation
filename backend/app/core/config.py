@@ -11,17 +11,18 @@ class Settings(BaseSettings):
     # Data source: mock | udp | zmq
     DATA_SOURCE: str = "mock"
 
-    # UDP
+    # UDP（保留兼容）
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 9000
 
-    # ZMQ broker addresses. Subscribers connect to FRONTEND; publishers connect to BACKEND.
-    ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
-    ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"
+    # PLC 司机台（TCP）
+    PLC_HOST: str = "192.168.100.123"  # PLC 默认 IP
+    PLC_PORT: int = 8001               # PLC 端口（8001/8002/8003 按需改）
 
-    # Compatibility for older modules.
-    ZMQ_ADDRESS: str = "tcp://127.0.0.1:5555"
-    zmq_address: str = "tcp://127.0.0.1:5555"
+    # ZMQ Broker 地址
+    zmq_address: str = "tcp://localhost:5555"
+    ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"  # 订阅者连接
+    ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"   # 发布者连接
 
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 
