@@ -113,7 +113,11 @@ class MessageRouter:
         train.step_ato(ato_command, self.default_dt)
 
     def _handle_ma_state(self, msg: dict):
-        for item in msg.get("ma_limits", []):
+        ma_limits = msg.get("ma_limits")
+        if ma_limits is None and msg.get("vehicle_id"):
+            ma_limits = [msg]
+
+        for item in ma_limits or []:
             vehicle_id = self._resolve_vehicle_id(item)
             train = self.train_manager.get_train(vehicle_id)
             if train is None:

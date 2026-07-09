@@ -138,7 +138,7 @@ class TrainManager:
             driver_input = DriverInput(
                 vehicle_id=train.state.vehicle_id,
                 line_id=train.state.line_id,
-                source="vehicle_udp",
+                source="udp",
                 control_mode="manual",
                 traction_level=traction_level,
                 brake_level=brake_level,

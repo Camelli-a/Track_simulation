@@ -3,6 +3,11 @@ from app.vehicle_sim.evaluation.recorder import RunRecorder
 from app.vehicle_sim.adapters.command_mapping import command_percent_to_levels
 from app.vehicle_sim.adapters.id_mapping import vehicle_id_to_index
 from app.vehicle_sim.adapters.units import m_to_cm, ms_to_cms
+from app.vehicle_sim.adapters.vehicle_api_codec import (
+    API_VALUE_COUNT,
+    build_api_input_parameters,
+    build_api_output_values,
+)
 from app.vehicle_sim.adapters.vehicle_udp_codec import (
     INPUT_PACKET_SIZE,
     OUTPUT_PACKET_SIZE,
@@ -29,6 +34,13 @@ def run_adapter_checks():
         {1: {"acceleration": 0.3, "speed": 12.5, "mileage": 123.4}}
     )
     assert len(output) == OUTPUT_PACKET_SIZE
+
+    api_values = build_api_output_values(
+        {1: {"train_index": 1, "acceleration": 0.3, "speed": 12.5, "position": 123.4}}
+    )
+    assert len(api_values) == API_VALUE_COUNT
+    api_parameters = build_api_input_parameters({1: {"operation_command": 1}})
+    assert len(api_parameters) == API_VALUE_COUNT
 
     input_packet = pack_vehicle_input(
         {

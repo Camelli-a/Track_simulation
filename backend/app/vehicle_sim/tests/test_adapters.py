@@ -1,6 +1,13 @@
 from app.vehicle_sim.adapters.command_mapping import command_percent_to_levels
 from app.vehicle_sim.adapters.id_mapping import index_to_vehicle_id, vehicle_id_to_index
 from app.vehicle_sim.adapters.units import m_to_cm, m_to_mm, ms_to_cms, ms_to_mms
+from app.vehicle_sim.adapters.vehicle_api_codec import (
+    API_VALUE_COUNT,
+    api_input_path,
+    build_api_input_parameters,
+    build_api_output_values,
+    parse_api_output_values,
+)
 from app.vehicle_sim.adapters.vehicle_udp_codec import (
     API_CYCLE_SECONDS,
     INPUT_PACKET_SIZE,
@@ -104,7 +111,38 @@ def test_vehicle_input_clamps_percent_and_builds_driver_messages():
     messages = vehicle_input_to_driver_messages(commands)
     assert messages[0]["type"] == "driver_input"
     assert messages[0]["train_index"] == 1
-    assert messages[0]["source"] == "vehicle_udp"
+    assert messages[0]["source"] == "udp"
+
+
+def test_vehicle_formal_api_codec_matches_document_shape():
+    manager = TrainManager()
+    manager.reset_trains(25)
+
+    values = build_api_output_values(manager)
+    parsed = parse_api_output_values(values)
+    parameters = build_api_input_parameters(
+        {
+            1: {
+                "train_id": 1,
+                "operation_command": 2,
+                "segment": 3,
+                "offset": 12.5,
+                "direction": 1,
+                "active_cab": 1,
+            }
+        }
+    )
+
+    assert len(values) == API_VALUE_COUNT
+    assert len(parameters) == API_VALUE_COUNT
+    assert parsed[1]["train_id"] == 1.0
+    assert set(parsed) == set(range(1, 21))
+    assert api_input_path(1, "train_id").endswith("/ID1/Value")
+    assert api_input_path(20, "active_cab").endswith("/active_Tc20/Value")
+    assert parameters[0] == {
+        "path": "PowerSystemAndTrainsV1/SS_Trains1_2/Train1_2/Train_Control/ID1/Value",
+        "value": 1.0,
+    }
 
 
 def test_command_percent_mapping():
@@ -150,4 +188,27 @@ def test_router_set_train_state_creates_missing_train():
     assert train is not None
     assert train.state.position == 1200.0
     assert train.state.speed_kmh == 36.0
+
+
+def test_router_accepts_flat_ma_state_like_data_flow_listener():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+
+    router.handle(
+        {
+            "type": "ma_state",
+            "vehicle_id": "TRAIN-001",
+            "ma_limit": 500.0,
+            "speed_limit": 45.0,
+            "distance_to_ma": 120.0,
+            "permission": "restricted",
+            "signal_state": "yellow",
+        }
+    )
+
+    train = manager.get_train("TRAIN-001")
+    assert train.ma_limit == 500.0
+    assert train.allowed_speed_kmh == 45.0
+    assert train.target_distance_m == 120.0
+    assert train.permission == "restricted"
 

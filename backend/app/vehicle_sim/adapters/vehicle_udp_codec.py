@@ -137,7 +137,7 @@ def vehicle_input_to_driver_messages(commands: dict[int, dict]) -> list[dict]:
                 "train_index": train_index,
                 "command": command["command"],
                 "percent": command["percent"],
-                "source": "vehicle_udp",
+                "source": "udp",
                 "control_mode": "manual",
             }
         )
