@@ -21,6 +21,27 @@ EMERGENCY_BRAKE_DECELERATION = 1.2
 BRAKING_SAFETY_MARGIN = 30.0
 WARNING_MARGIN = 50.0
 
+STATIC_SPEED_LIMITS = [
+    {
+        "limit_id": "SL-001",
+        "start": 0.0,
+        "end": 500.0,
+        "speed_limit": 60.0,
+        "source_index": 1,
+        "source_name": "demo_static_limit_1",
+        "reason": "static_line_limit",
+    },
+    {
+        "limit_id": "SL-002",
+        "start": 500.0,
+        "end": 2500.0,
+        "speed_limit": 80.0,
+        "source_index": 2,
+        "source_name": "demo_static_limit_2",
+        "reason": "static_line_limit",
+    },
+]
+
 # Extracted from the axle-counter section sheet plus Seg lengths.
 SECTIONS = [{'section_id': 'JZ1',
   'source_index': 1,
