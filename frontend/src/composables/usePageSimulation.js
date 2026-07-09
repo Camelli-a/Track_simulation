@@ -1,15 +1,9 @@
 import { onMounted, onBeforeUnmount } from 'vue'
 import { useSimulationStore } from '@/stores/simulation'
 
-/** 子系统页面共用：进入时确保 WebSocket 已连接 */
+/** 子系统页面共用：仅读取全局仿真状态 */
 export function usePageSimulation() {
-  const store = useSimulationStore()
-
-  onMounted(() => {
-    if (!store.connected) store.connect()
-  })
-
-  return store
+  return useSimulationStore()
 }
 
 /** 布局级连接：整个应用生命周期内保持 WebSocket */

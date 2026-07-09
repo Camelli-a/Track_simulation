@@ -59,6 +59,7 @@ export function mergeSignals(staticSignals, dynamicSignals) {
   const stateMap = new Map((dynamicSignals ?? []).map((s) => [s.signal_id, s.state]))
   return staticSignals.map((s) => ({
     ...s,
+    signal_type: s.signal_type ?? null,
     state: stateMap.get(s.signal_id) ?? 'green',
   }))
 }
@@ -77,9 +78,12 @@ export function mergeTurnouts(staticTurnouts, dynamicTurnouts) {
       track_seg_id: t.track_seg_id,
       graph_x: t.graph_x,
       graph_y: t.graph_y,
+      merge_seg_id: t.merge_seg_id ?? null,
+      normal_seg: t.normal_seg ?? null,
+      reverse_seg: t.reverse_seg ?? null,
       state: dyn?.state ?? 'normal',
       locked: dyn?.locked ?? false,
-      related_section: dyn?.related_section ?? null,
+      related_section: dyn?.related_section ?? t.related_section ?? null,
     }
   })
 }

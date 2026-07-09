@@ -1,0 +1,90 @@
+{
+  "line_id": "LINE-1",
+  "name": "轨道仿真示范线",
+  "total_length_m": 5000,
+  "stations": [
+    {
+      "station_id": "STA-01",
+      "name": "中心站",
+      "position": 1250,
+      "graph_x": 240,
+      "graph_y": 180
+    },
+    {
+      "station_id": "STA-02",
+      "name": "东环站",
+      "position": 3750,
+      "graph_x": 760,
+      "graph_y": 180
+    }
+  ],
+  "blocks": [
+    { "segment_id": "SEG-01", "track_seg_id": "T01", "start": 0, "end": 500 },
+    { "segment_id": "SEG-02", "track_seg_id": "T02", "start": 500, "end": 1000 },
+    { "segment_id": "SEG-03", "track_seg_id": "T03", "start": 1000, "end": 1500 },
+    { "segment_id": "SEG-04", "track_seg_id": "T04", "start": 1500, "end": 2000 },
+    { "segment_id": "SEG-05", "track_seg_id": "T05", "start": 2000, "end": 2500 },
+    { "segment_id": "SEG-06", "track_seg_id": "T06", "start": 2500, "end": 3000 },
+    { "segment_id": "SEG-07", "track_seg_id": "T07", "start": 3000, "end": 3500 },
+    { "segment_id": "SEG-08", "track_seg_id": "T08", "start": 3500, "end": 4000 },
+    { "segment_id": "SEG-09", "track_seg_id": "T09", "start": 4000, "end": 4500 },
+    { "segment_id": "SEG-10", "track_seg_id": "T10", "start": 4500, "end": 5000 }
+  ],
+  "signals": [
+    { "signal_id": "SIG-01", "position": 0, "signal_type": "区间", "graph_x": 40, "graph_y": 148 },
+    { "signal_id": "SIG-02", "position": 500, "signal_type": "区间", "graph_x": 140, "graph_y": 148 },
+    { "signal_id": "SIG-03", "position": 1000, "signal_type": "出站", "graph_x": 230, "graph_y": 148 },
+    { "signal_id": "SIG-04", "position": 1500, "signal_type": "区间", "graph_x": 330, "graph_y": 148 },
+    { "signal_id": "SIG-05", "position": 2000, "signal_type": "防护", "graph_x": 430, "graph_y": 148 },
+    { "signal_id": "SIG-06", "position": 2500, "signal_type": "区间", "graph_x": 530, "graph_y": 148 },
+    { "signal_id": "SIG-07", "position": 3000, "signal_type": "防护", "graph_x": 630, "graph_y": 148 },
+    { "signal_id": "SIG-08", "position": 3500, "signal_type": "出站", "graph_x": 730, "graph_y": 148 },
+    { "signal_id": "SIG-09", "position": 4000, "signal_type": "区间", "graph_x": 830, "graph_y": 148 },
+    { "signal_id": "SIG-10", "position": 4500, "signal_type": "区间", "graph_x": 930, "graph_y": 148 }
+  ],
+  "turnouts": [
+    {
+      "turnout_id": "SW-01",
+      "switch_id": "SW-01",
+      "position": 1750,
+      "graph_x": 375,
+      "graph_y": 180,
+      "related_section": "SEG-04"
+    },
+    {
+      "turnout_id": "SW-02",
+      "switch_id": "SW-02",
+      "position": 3250,
+      "graph_x": 675,
+      "graph_y": 180,
+      "related_section": "SEG-07"
+    }
+  ],
+  "platforms": [
+    { "platform_id": "PF-01", "station_id": "STA-01", "name": "中心站 1 站台", "position": 1250 },
+    { "platform_id": "PF-02", "station_id": "STA-02", "name": "东环站 1 站台", "position": 3750 }
+  ],
+  "slope_profile": [
+    { "position": 0, "slope": 0 },
+    { "position": 500, "slope": 8 },
+    { "position": 1500, "slope": 0 },
+    { "position": 2500, "slope": 8 },
+    { "position": 3500, "slope": 0 }
+  ],
+  "graph": {
+    "edges": [
+      { "seg_id": "T01", "x1": 40, "y1": 180, "x2": 140, "y2": 180, "branch": "main" },
+      { "seg_id": "T02", "x1": 140, "y1": 180, "x2": 240, "y2": 180, "branch": "main" },
+      { "seg_id": "T03", "x1": 240, "y1": 180, "x2": 340, "y2": 180, "branch": "main" },
+      { "seg_id": "T04", "x1": 340, "y1": 180, "x2": 440, "y2": 180, "branch": "main" },
+      { "seg_id": "T05", "x1": 440, "y1": 180, "x2": 540, "y2": 180, "branch": "main" },
+      { "seg_id": "T06", "x1": 540, "y1": 180, "x2": 640, "y2": 180, "branch": "main" },
+      { "seg_id": "T07", "x1": 640, "y1": 180, "x2": 740, "y2": 180, "branch": "main" },
+      { "seg_id": "T08", "x1": 740, "y1": 180, "x2": 840, "y2": 180, "branch": "main" },
+      { "seg_id": "T09", "x1": 840, "y1": 180, "x2": 940, "y2": 180, "branch": "main" },
+      { "seg_id": "T10", "x1": 940, "y1": 180, "x2": 1040, "y2": 180, "branch": "main" },
+      { "seg_id": "BR-01", "x1": 375, "y1": 180, "x2": 520, "y2": 250, "branch": "branch" },
+      { "seg_id": "BR-02", "x1": 520, "y1": 250, "x2": 675, "y2": 180, "branch": "branch" }
+    ]
+  }
+}
