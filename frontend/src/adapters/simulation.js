@@ -137,11 +137,32 @@ function normalizeAlarm(a) {
   return {
     alarm_id: a.alarm_id ?? `ALM-${a.timestamp ?? Date.now()}`,
     level: a.level ?? 'info',
+    level_label: a.level_label ?? levelLabel(a.level),
     source: a.source ?? 'BACKEND',
+    source_label: a.source_label ?? sourceLabel(a.source),
     vehicle_id: a.vehicle_id ?? null,
     message: a.message ?? '',
     timestamp: a.timestamp ?? null,
   }
+}
+
+function levelLabel(level) {
+  if (level === 'critical') return '严重'
+  if (level === 'warning') return '警告'
+  if (level === 'info') return '信息'
+  return level ?? '未知'
+}
+
+function sourceLabel(source) {
+  const map = {
+    ATP: 'ATP 安全防护',
+    ATO: 'ATO 自动驾驶',
+    SIGNAL: '信号系统',
+    POWER: '供电系统',
+    COMM: '通信系统',
+    BACKEND: '后端服务',
+  }
+  return map[source] ?? source ?? '未知来源'
 }
 
 function deriveSystemMode(raw) {

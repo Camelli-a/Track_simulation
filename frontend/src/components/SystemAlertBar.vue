@@ -47,7 +47,7 @@ const allAlerts = computed(() => {
       key: a.alarm_id,
       level: mapAlarmLevel(a.level),
       icon: LEVEL_ICON[a.level] ?? '⚠️',
-      source: a.source,
+      source: a.source_label ?? a.source,
       message: a.vehicle_id ? `[${a.vehicle_id}] ${a.message}` : a.message,
       action: a.level === 'critical' ? '请优先检查当前故障链路' : '建议结合对应页面继续定位',
     })

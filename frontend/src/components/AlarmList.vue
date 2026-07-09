@@ -21,13 +21,13 @@
         <div class="flex-1 min-w-0">
           <p class="text-gray-200">{{ a.message }}</p>
           <p class="text-[10px] text-gray-500 mt-0.5">
-            {{ a.source }}
+            {{ a.source_label ?? a.source }}
             <template v-if="a.vehicle_id"> · {{ a.vehicle_id }}</template>
             <template v-if="a.timestamp"> · {{ formatTime(a.timestamp) }}</template>
           </p>
         </div>
         <span class="text-[10px] uppercase shrink-0" :class="levelTextClass(a.level)">
-          {{ a.level }}
+          {{ a.level_label ?? levelLabel(a.level) }}
         </span>
       </div>
     </div>
@@ -49,6 +49,13 @@ function levelTextClass(level) {
   if (level === 'critical') return 'text-red-400'
   if (level === 'warning') return 'text-amber-400'
   return 'text-sky-400'
+}
+
+function levelLabel(level) {
+  if (level === 'critical') return '严重'
+  if (level === 'warning') return '警告'
+  if (level === 'info') return '信息'
+  return level ?? '未知'
 }
 
 function formatTime(ts) {

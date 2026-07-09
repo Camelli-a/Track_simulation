@@ -198,7 +198,9 @@ class PowerSnapshot(BaseModel):
 class AlarmEvent(BaseModel):
     alarm_id: str
     level: AlarmLevel = "info"
+    level_label: Optional[str] = None
     source: str = "BACKEND"
+    source_label: Optional[str] = None
     vehicle_id: Optional[str] = None
     message: str
     timestamp: float
