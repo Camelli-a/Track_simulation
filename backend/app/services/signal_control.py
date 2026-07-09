@@ -202,6 +202,10 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "route_speed_limit": speed_limit_rule["route_speed_limit"],
         "static_speed_limit": speed_limit_rule["static_speed_limit"],
         "static_speed_limit_id": speed_limit_rule["static_speed_limit_id"],
+        "static_speed_limit_source": static_limit.get("source") if static_limit else None,
+        "static_speed_limit_related_switch_id": (
+            static_limit.get("related_switch_id") if static_limit else None
+        ),
         "fault_speed_limit": speed_limit_rule["fault_speed_limit"],
         "speed_limit_reason": speed_limit_rule["speed_limit_reason"],
         "required_stop_distance": signal_rule["required_stop_distance"],

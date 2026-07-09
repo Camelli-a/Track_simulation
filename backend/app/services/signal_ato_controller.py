@@ -1,6 +1,10 @@
 from copy import deepcopy
 import math
 
+from app.services.signal_gradient import (
+    calculate_effective_deceleration,
+    find_gradient_at_position,
+)
 from app.services.signal_track_config import STOP_TARGETS
 
 
@@ -266,6 +270,7 @@ class AtoController:
         stop_targets=None,
         pid_controller_factory=None,
         strategy_optimizer=None,
+        gradient_profile=None,
         low_speed_threshold=0.5,
         creep_speed_limit=5.0,
         stop_deceleration=0.8,
@@ -273,6 +278,7 @@ class AtoController:
         self.stop_targets = stop_targets if stop_targets is not None else STOP_TARGETS
         self.pid_controller_factory = pid_controller_factory or PIDController
         self.strategy_optimizer = strategy_optimizer or AtoStrategyOptimizer()
+        self.gradient_profile = gradient_profile
         self.low_speed_threshold = low_speed_threshold
         self.creep_speed_limit = creep_speed_limit
         self.stop_deceleration = stop_deceleration
@@ -322,6 +328,7 @@ class AtoController:
         current_position = _to_float(train_state.get("position"), 0.0)
         current_speed = _to_float(train_state.get("speed"), 0.0)
         safe_speed_limit = max(_to_float(ma_limit.get("speed_limit"), 0.0), 0.0)
+        gradient_info, effective_deceleration = self._gradient_context(current_position)
 
         if ma_limit.get("permission") == "stop" or safe_speed_limit <= 0:
             return self._degraded_command(
@@ -329,6 +336,8 @@ class AtoController:
                 ma_limit=ma_limit,
                 reason=ma_limit.get("reason") or "signal_stop",
                 safe_speed_limit=safe_speed_limit,
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         stop_target = find_next_stop_target(train_state, self.stop_targets)
@@ -348,6 +357,8 @@ class AtoController:
                 reason="no_stop_target",
                 selected_strategy="cruise",
                 strategy_scores=[],
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         target_position = _to_float(stop_target.get("position"), 0.0)
@@ -365,6 +376,8 @@ class AtoController:
                 distance_to_target=distance_to_target,
                 reason="overshoot",
                 safe_speed_limit=safe_speed_limit,
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         if abs(distance_to_target) <= stop_window_half_width and current_speed <= self.low_speed_threshold:
@@ -383,6 +396,8 @@ class AtoController:
                 reason="stopped_in_window",
                 selected_strategy="holding",
                 strategy_scores=[],
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         if 0 <= distance_to_target <= 5.0:
@@ -406,12 +421,14 @@ class AtoController:
                     "approach_distance": approach_distance,
                     "ato_state": "creep",
                 },
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         if 5.0 < distance_to_target <= approach_distance:
             stop_curve_speed_limit = calculate_stop_curve_speed_limit(
                 distance_to_target,
-                self.stop_deceleration,
+                effective_deceleration,
             )
             target_speed = min(safe_speed_limit, stop_curve_speed_limit)
             ato_state = "braking_to_stop" if target_speed < current_speed else "approach_station"
@@ -435,6 +452,8 @@ class AtoController:
                     "approach_distance": approach_distance,
                     "ato_state": ato_state,
                 },
+                gradient_info=gradient_info,
+                effective_deceleration=effective_deceleration,
             )
 
         return self._command_with_pid(
@@ -450,6 +469,8 @@ class AtoController:
             reason="far_from_stop_target",
             selected_strategy="energy_saving",
             strategy_scores=[],
+            gradient_info=gradient_info,
+            effective_deceleration=effective_deceleration,
         )
 
     def _command_with_pid(
@@ -468,16 +489,22 @@ class AtoController:
         selected_strategy="pid_basic",
         score=None,
         strategy_scores=None,
+        gradient_info=None,
+        effective_deceleration=None,
     ) -> dict:
         vehicle_id = train_state.get("vehicle_id")
         current_speed = _to_float(train_state.get("speed"), 0.0)
-        target_speed = round(max(min(target_speed, safe_speed_limit), 0.0), 1)
+        target_speed = self._clamp_target_speed(target_speed, safe_speed_limit, stop_curve_speed_limit)
         if optimize_context is not None:
             optimization = self.strategy_optimizer.optimize(
                 **optimize_context,
                 creep_speed_limit=self.creep_speed_limit,
             )
-            target_speed = round(max(min(optimization["target_speed"], safe_speed_limit), 0.0), 1)
+            target_speed = self._clamp_target_speed(
+                optimization["target_speed"],
+                safe_speed_limit,
+                stop_curve_speed_limit,
+            )
             selected_strategy = optimization["selected_strategy"]
             score = optimization["score"]
             strategy_scores = optimization["strategy_scores"]
@@ -502,6 +529,8 @@ class AtoController:
             selected_strategy=selected_strategy,
             score=score,
             strategy_scores=strategy_scores or [],
+            gradient_info=gradient_info,
+            effective_deceleration=effective_deceleration,
         )
 
     def _degraded_command(
@@ -512,6 +541,8 @@ class AtoController:
         distance_to_target=None,
         reason="signal_stop",
         safe_speed_limit=0.0,
+        gradient_info=None,
+        effective_deceleration=None,
     ) -> dict:
         return self._base_command(
             train_state=train_state,
@@ -528,6 +559,8 @@ class AtoController:
             reason=reason,
             selected_strategy="safety_stop",
             strategy_scores=[],
+            gradient_info=gradient_info,
+            effective_deceleration=effective_deceleration,
         )
 
     def _base_command(
@@ -547,8 +580,12 @@ class AtoController:
         selected_strategy="pid_basic",
         score=None,
         strategy_scores=None,
+        gradient_info=None,
+        effective_deceleration=None,
     ) -> dict:
-        target_speed = round(max(min(target_speed, safe_speed_limit), 0.0), 1)
+        target_speed = self._clamp_target_speed(target_speed, safe_speed_limit, stop_curve_speed_limit)
+        if effective_deceleration is None:
+            effective_deceleration = calculate_effective_deceleration(self.stop_deceleration, None)
         if stop_target:
             target_position = _to_float(stop_target.get("position"), 0.0)
             window_before = _to_float(stop_target.get("window_before"), 0.5)
@@ -586,6 +623,10 @@ class AtoController:
             "strategy_scores": strategy_scores or [],
             "reason": reason,
             "speed_limit_reason": ma_limit.get("speed_limit_reason"),
+            "gradient": round(float(gradient_info["gradient"]), 3) if gradient_info else None,
+            "gradient_id": gradient_info.get("gradient_id") if gradient_info else None,
+            "gradient_unit": gradient_info.get("gradient_unit") if gradient_info else None,
+            "effective_deceleration": round(max(float(effective_deceleration), 0.0), 3),
         }
 
     def _pid_for_vehicle(self, vehicle_id):
@@ -607,6 +648,19 @@ class AtoController:
             matching_targets,
             key=lambda item: abs(_to_float(item.get("position"), 0.0) - current_position),
         )
+
+    def _gradient_context(self, position: float) -> tuple[dict | None, float]:
+        gradient_info = find_gradient_at_position(position, self.gradient_profile)
+        gradient_value = gradient_info.get("gradient") if gradient_info else None
+        return (
+            gradient_info,
+            calculate_effective_deceleration(self.stop_deceleration, gradient_value),
+        )
+
+    def _clamp_target_speed(self, target_speed, safe_speed_limit, stop_curve_speed_limit) -> float:
+        safe_limit = max(_to_float(safe_speed_limit, 0.0), 0.0)
+        curve_limit = max(_to_float(stop_curve_speed_limit, 0.0), 0.0)
+        return round(max(min(_to_float(target_speed, 0.0), safe_limit, curve_limit), 0.0), 1)
 
 
 def _value_to_level(value: float) -> int:

@@ -159,7 +159,7 @@ ma_state
 - `section.start` / `section.end` 当前是按表格顺序累计得到的一维近似坐标。
 - `signal.position` 当前也是累计坐标近似。
 - `required_switches` 第一版仍以人工配置为主。
-- `STATIC_SPEED_LIMITS` 第一版已接入 demo 静态限速配置，后续可替换为老师 Excel 静态限速表。
+- `STATIC_SPEED_LIMITS` 已从老师 Excel 静态限速表离线抽取为 Python 常量。
 - `side_speed_limit` 单位后续需要结合课程数据定义确认。
 
 ## 6. MA 计算逻辑
@@ -355,17 +355,17 @@ ZMQ 包装格式由 `MessageBus` 自动生成：
 - 当前使用一维线路坐标。
 - `section.start` / `section.end` 是按表格顺序累计的近似坐标。
 - 真实 Seg 拓扑寻路尚未实现。
-- `route_request` 暂未通过 ZMQ 接入。
+- `route_request` 已通过 ZMQ 接入，但尚未实现工业级完整进路生命周期。
 - `required_switches` 尚未从真实进路自动推断。
-- 静态限速表、坡度表、保护区段表暂未接入。
+- 静态限速表已接入；坡度表已用于 ATO 停车曲线修正；保护区段表暂未接入。
 - 制动模型为简化匀减速模型，不是工业级安全制动模型。
 - 本系统用于课程设计仿真，不是 SIL4 安全级实现。
 
 后续可扩展：
 
-- 接入 `route_request` topic。
-- 接入静态限速表。
-- 接入坡度表修正制动距离。
+- 完善 `route_request` 的真实联锁表推断和释放规则。
+- 接入道岔侧向限速。
+- 后续可将坡度表进一步接入 MA/ATP 制动距离修正。
 - 根据 Seg 邻接关系生成真实拓扑里程。
 - 自动推断进路 `required_switches`。
 - 增加完整进路锁闭 / 解锁生命周期。
@@ -373,12 +373,14 @@ ZMQ 包装格式由 `MessageBus` 自动生成：
 
 ## 静态限速第一版接入
 
-`signal_track_config.py` 当前新增了第一版 demo 静态限速表 `STATIC_SPEED_LIMITS`：
+`signal_track_config.py` 当前的 `STATIC_SPEED_LIMITS` 来自老师 Excel 静态限速表的离线抽取，共覆盖老师表中的静态限速区间。
 
-- `SL-001`：`0.0m <= position < 500.0m`，`speed_limit = 60.0 km/h`
-- `SL-002`：`500.0m <= position < 2500.0m`，`speed_limit = 80.0 km/h`
+老师表原始字段包括：限速区段所处 Seg 编号、起点/终点 Seg 偏移量、关联道岔编号和限速值。当前实现按以下规则统一：
 
-所有速度单位统一为 `km/h`，`start` / `end` 使用当前系统的一维 position 坐标。后续可以从老师 Excel 静态限速表生成真实配置。
+- 老师表限速值按 `cm/s * 0.036` 转换为 `km/h`，例如 `1333 cm/s ≈ 48.0 km/h`。
+- 起点/终点偏移量按 `cm / 100` 转换为 `m`。
+- `start` / `end` 使用当前系统的一维累计 position 坐标，暂不做完整 Seg 图搜索。
+- 本轮只接入静态线路限速，道岔侧向限速后续单独接入。
 
 `ma_state.ma_limits[]` 新增以下字段：
 
@@ -386,6 +388,8 @@ ZMQ 包装格式由 `MessageBus` 自动生成：
 |------|------|
 | `static_speed_limit` | 当前 position 命中的静态线路限速 |
 | `static_speed_limit_id` | 当前命中的静态限速区间 ID |
+| `static_speed_limit_source` | 当前命中的静态限速来源 |
+| `static_speed_limit_related_switch_id` | 老师表中的关联道岔编号，缺失时为 `None` |
 | `fault_speed_limit` | train_state 或 704 映射输入中的故障限速 |
 | `speed_limit_reason` | 当前主导限速原因 |
 
@@ -433,6 +437,10 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
       "platform_id": "PF-001",
       "platform_name": "GGZ-P01",
       "stop_target_source": "teacher_platform_table",
+      "gradient": -3.5,
+      "gradient_id": "GR-002",
+      "gradient_unit": "permille",
+      "effective_deceleration": 0.766,
       "traction_level": 0,
       "brake_level": 2,
       "holding_brake": false,
@@ -449,6 +457,8 @@ ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全�
 ```
 
 `STOP_TARGETS` 当前由 `signal_track_config.py` 统一提供，优先来源为老师 Excel 中的车站表 / 站台表。第一版按站台中心公里标生成停车点，并用 `route.start <= platform.position <= route.end` 将站台与进路关联；无法匹配时后续可 fallback 到 `route.end` / `end_signal_id`。ATO 使用 `STOP_TARGETS` 计算停车曲线，不直接更新车辆位置；停车精度后续由 `stop_result` 评价。
+
+`GRADIENT_PROFILE` 当前由老师 Excel 坡度表离线抽取生成。坡度按千分坡 `permille` 处理，第一版将 `0x55` 视为上坡、`0xaa` 视为下坡。ATO 会按当前位置查询坡度并修正 `effective_deceleration`：上坡增大有效制动减速度，下坡减小有效制动减速度。该修正只影响 ATO 停车曲线和目标速度策略，暂不修改 MA/ATP 安全边界。
 
 `target_speed` 始终不超过 `safe_speed_limit`。车辆模块后续订阅 `ato_command` 后自行执行动力学；本模块不替代车辆模型，也不做真实深度学习训练。
 
