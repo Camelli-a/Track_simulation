@@ -14,6 +14,7 @@ from app.services.signal_hardware_adapter import (  # noqa: E402
     build_train_control_suggestion,
     map_signal_state_to_hardware_code,
     map_switch_position_to_hardware_code,
+    map_switch_to_hardware_code,
     normalize_hardware_train_state,
 )
 
@@ -66,6 +67,25 @@ def test_map_switch_position_to_hardware_code():
     assert map_switch_position_to_hardware_code("Reverse") == 0x02
     assert map_switch_position_to_hardware_code("fault") == 0x04
     assert map_switch_position_to_hardware_code(None) == 0x00
+
+
+def test_hardware_adapter_maps_locked_normal_and_locked_reverse():
+    assert (
+        map_switch_to_hardware_code({"state": "locked_normal", "position": "normal"})
+        == 0x01
+    )
+    assert (
+        map_switch_to_hardware_code({"state": "locked_reverse", "position": "reverse"})
+        == 0x02
+    )
+
+
+def test_hardware_adapter_maps_fault_and_four_open():
+    assert map_switch_to_hardware_code({"state": "fault", "position": "normal"}) == 0x04
+    assert (
+        map_switch_to_hardware_code({"state": "four_open", "position": "reverse"})
+        == 0x04
+    )
 
 
 def test_map_signal_state_to_hardware_code():

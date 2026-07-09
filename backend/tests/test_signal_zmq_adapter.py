@@ -390,6 +390,62 @@ def test_route_request_participates_in_snapshot_route_results():
     assert route_results[0]["reason"] == "switch_locked_conflict"
 
 
+def test_adapter_signal_state_includes_route_states():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+    adapter.train_states_by_id["TRAIN-001"] = {
+        "vehicle_id": "TRAIN-001",
+        "position": 300.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-001"] = 100.0
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-001",
+            "route_id": "R_MAIN",
+        },
+    )
+
+    signal_state = _published_data(fake_bus, "signal_state")[-1]
+    assert "route_states" in signal_state
+    assert signal_state["route_states"][0]["route_id"] == "R_MAIN"
+    assert signal_state["route_states"][0]["state"] in {"locked", "active"}
+
+
+def test_adapter_signal_state_switches_include_state_fields():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+    adapter.train_states_by_id["TRAIN-001"] = {
+        "vehicle_id": "TRAIN-001",
+        "position": 300.0,
+        "speed": 25.0,
+        "route_id": "R_MAIN",
+    }
+    adapter.train_last_update_at["TRAIN-001"] = 100.0
+
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-001",
+            "route_id": "R_MAIN",
+        },
+    )
+
+    signal_state = _published_data(fake_bus, "signal_state")[-1]
+    switch = signal_state["switches"][0]
+    for field_name in (
+        "state",
+        "target_position",
+        "moving",
+        "fault",
+        "four_open",
+    ):
+        assert field_name in switch
+
+
 def test_route_request_does_not_break_timeout_fail_safe():
     fake_bus = FakeBus()
     adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)

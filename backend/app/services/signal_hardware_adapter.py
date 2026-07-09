@@ -157,6 +157,23 @@ def map_switch_position_to_hardware_code(position: str | None) -> int:
     return SWITCH_DEFAULT_CODE
 
 
+def map_switch_to_hardware_code(switch: dict) -> int:
+    state = _normalize_text(switch.get("state"))
+    position = _normalize_text(switch.get("position"))
+
+    if state == "fault" or switch.get("fault") is True:
+        return SWITCH_FOUR_OPEN_CODE
+    if state == "four_open" or switch.get("four_open") is True:
+        return SWITCH_FOUR_OPEN_CODE
+    if state.startswith("moving_to_"):
+        return SWITCH_DEFAULT_CODE
+    if state in {"locked_normal", "normal"} or position == "normal":
+        return SWITCH_NORMAL_CODE
+    if state in {"locked_reverse", "reverse"} or position == "reverse":
+        return SWITCH_REVERSE_CODE
+    return SWITCH_DEFAULT_CODE
+
+
 def map_signal_state_to_hardware_code(state: str | None) -> int:
     return {
         "red": SIGNAL_RED_CODE,
@@ -233,7 +250,7 @@ def build_hardware_signal_output(snapshot: dict) -> dict:
                 "switch_id": switch_id,
                 "source_index": source_index,
                 "position": position,
-                "hardware_code": map_switch_position_to_hardware_code(position),
+                "hardware_code": map_switch_to_hardware_code(switch),
                 "locked": switch.get("locked", False),
                 "locked_by_route_id": switch.get("locked_by_route_id"),
             }
