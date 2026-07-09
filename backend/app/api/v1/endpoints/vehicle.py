@@ -5,12 +5,18 @@ from app.data_flow.state_store import state_store
 from app.schemas.vehicle import (
     VehicleControlRequest,
     VehicleControlResponse,
+    VehicleManagementRequest,
+    VehicleManagementResponse,
     VehicleStatus,
 )
 from app.services.vehicle_service import VehicleService
+from app.vehicle_sim.message_router import MessageRouter
+from app.vehicle_sim.train_manager import TrainManager
 
 router = APIRouter()
 service = VehicleService()
+vehicle_manager = TrainManager()
+vehicle_message_router = MessageRouter(vehicle_manager)
 
 
 @router.get("/status", response_model=VehicleStatus, summary="Get current vehicle status")
@@ -37,6 +43,35 @@ def control_vehicle(command: VehicleControlRequest) -> VehicleControlResponse:
         published=published,
         topic=topic,
         message=message,
+    )
+
+
+@router.get("/trains", summary="List managed vehicle simulation trains")
+def list_vehicle_trains() -> dict:
+    return {
+        "count": len(vehicle_manager.trains),
+        "trains": vehicle_manager.list_trains(),
+    }
+
+
+@router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
+def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
+    message = _build_vehicle_management_message(command)
+    result = vehicle_message_router.handle(message)
+    if result is None:
+        result = {"ok": False, "reason": "unsupported_vehicle_management_command"}
+
+    topic = command.type
+    published = publish_module_message(topic, _management_publish_payload(message))
+    trains = vehicle_manager.list_trains()
+    state_store.replace_trains(trains)
+
+    return VehicleManagementResponse(
+        ok=bool(result.get("ok", False)),
+        published=published,
+        topic=topic,
+        result=result,
+        trains=trains,
     )
 
 
@@ -79,3 +114,41 @@ def _build_vehicle_control_message(command: VehicleControlRequest) -> tuple[str,
         "direction": command.direction,
         "emergency_button": emergency_button,
     }
+
+
+def _management_publish_payload(message: dict) -> dict:
+    return {
+        key: value
+        for key, value in message.items()
+        if key not in {"type"}
+    }
+
+
+def _build_vehicle_management_message(command: VehicleManagementRequest) -> dict:
+    if command.type == "add_train":
+        message = {
+            "type": command.type,
+            "line_id": command.line_id,
+            "position": command.position,
+        }
+        if command.vehicle_id is not None:
+            message["vehicle_id"] = command.vehicle_id
+        if command.train_index is not None:
+            message["train_index"] = command.train_index
+        return message
+
+    if command.type == "remove_train":
+        message = {"type": command.type}
+        if command.vehicle_id is not None:
+            message["vehicle_id"] = command.vehicle_id
+        if command.train_index is not None:
+            message["train_index"] = command.train_index
+        return message
+
+    if command.type == "reset_trains":
+        return {
+            "type": command.type,
+            "count": 10 if command.count is None else command.count,
+        }
+
+    return {"type": command.type}

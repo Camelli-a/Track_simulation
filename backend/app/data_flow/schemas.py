@@ -15,6 +15,7 @@ SectionCondition = Literal["normal", "warning", "fault"]
 SectionAspect = Literal["green", "yellow", "red", "unknown"]
 SwitchPosition = Literal["normal", "reverse", "unknown"]
 AlarmLevel = Literal["info", "warning", "critical"]
+RouteRequestStatus = Literal["pending", "accepted", "rejected", "unknown"]
 
 
 class IncomingMessage(BaseModel):
@@ -64,6 +65,7 @@ class TrainSnapshot(BaseModel):
     position: float = 0.0
     speed: float = 0.0
     acceleration: float = 0.0
+    train_length: Optional[float] = None
     mode: TrainMode = "unknown"
     is_running: bool = True
     emergency_brake: bool = False
@@ -143,6 +145,21 @@ class RouteResult(BaseModel):
     locked_by_route_id: Optional[str] = None
 
 
+class RouteRequestSnapshot(BaseModel):
+    request_id: Optional[str] = None
+    vehicle_id: str
+    route_id: str = "R_MAIN"
+    origin_section_id: Optional[str] = None
+    destination_section_id: Optional[str] = None
+    start_position: Optional[float] = None
+    end_position: Optional[float] = None
+    priority: int = 0
+    status: RouteRequestStatus = "pending"
+    reason: Optional[str] = None
+    updated_at: float
+    raw_data: Dict[str, Any] = Field(default_factory=dict)
+
+
 class MovementAuthoritySnapshot(BaseModel):
     vehicle_id: str
     position: Optional[float] = None
@@ -198,7 +215,9 @@ class PowerSnapshot(BaseModel):
 class AlarmEvent(BaseModel):
     alarm_id: str
     level: AlarmLevel = "info"
+    level_label: Optional[str] = None
     source: str = "BACKEND"
+    source_label: Optional[str] = None
     vehicle_id: Optional[str] = None
     message: str
     timestamp: float
@@ -218,6 +237,31 @@ class DashboardSnapshot(BaseModel):
     sections: List[TrackSectionSnapshot] = Field(default_factory=list)
     signals: List[SignalSnapshot] = Field(default_factory=list)
     switches: List[SwitchSnapshot] = Field(default_factory=list)
+    route_requests: List[RouteRequestSnapshot] = Field(default_factory=list)
     route_results: List[RouteResult] = Field(default_factory=list)
     power: PowerSnapshot = Field(default_factory=PowerSnapshot)
     alarms: List[AlarmEvent] = Field(default_factory=list)
+
+
+class VehicleRegistrationCommand(BaseModel):
+    vehicle_id: str
+    line_id: str = "LINE-1"
+    route_id: str = "R_MAIN"
+    position: float = 0.0
+    speed: float = 0.0
+    acceleration: float = 0.0
+    train_length: Optional[float] = None
+    mode: TrainMode = "manual"
+    is_running: bool = False
+    emergency_brake: bool = False
+
+
+class RouteRequestCommand(BaseModel):
+    vehicle_id: str
+    route_id: str = "R_MAIN"
+    request_id: Optional[str] = None
+    origin_section_id: Optional[str] = None
+    destination_section_id: Optional[str] = None
+    start_position: Optional[float] = None
+    end_position: Optional[float] = None
+    priority: int = 0

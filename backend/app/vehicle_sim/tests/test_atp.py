@@ -1,18 +1,24 @@
-from app.vehicle_sim.atp import check_atp
+from app.vehicle_sim.atp import check_atp, evaluate_atp
+from app.vehicle_sim.message_router import MessageRouter
 from app.vehicle_sim.models import TrainState
+from app.vehicle_sim.train_manager import TrainManager
+
+
+def _state(speed_ms=20.0, position=100.0):
+    return TrainState(
+        vehicle_id="TRAIN-001",
+        line_id="LINE-1",
+        position=position,
+        speed_ms=speed_ms,
+        acceleration=0.0,
+        mode="manual",
+        is_running=speed_ms > 0,
+        emergency_brake=False,
+    )
 
 
 def test_overspeed_triggers_atp():
-    state = TrainState(
-        vehicle_id="TRAIN-001",
-        line_id="LINE-1",
-        position=100.0,
-        speed_ms=20.0,
-        acceleration=0.0,
-        mode="manual",
-        is_running=True,
-        emergency_brake=False,
-    )
+    state = _state()
 
     should_brake, alarm = check_atp(
         state=state,
@@ -25,3 +31,106 @@ def test_overspeed_triggers_atp():
     assert should_brake is True
     assert alarm is not None
     assert alarm["source"] == "ATP"
+
+
+def test_allowed_speed_warning_does_not_apply_eb_before_eb_margin():
+    decision = evaluate_atp(
+        state=_state(speed_ms=12.0),
+        speed_limit=80.0,
+        ma_limit=1000.0,
+        power_fault=False,
+        comm_ok=True,
+        allowed_speed_kmh=40.0,
+        eb_trigger_speed_kmh=55.0,
+    )
+
+    assert decision.emergency_brake is False
+    assert decision.supervision_state == "overspeed_warning"
+    assert decision.alarm is not None
+    assert decision.alarm["level"] == "warning"
+
+
+def test_eb_trigger_speed_applies_emergency_brake():
+    decision = evaluate_atp(
+        state=_state(speed_ms=16.0),
+        speed_limit=80.0,
+        ma_limit=1000.0,
+        power_fault=False,
+        comm_ok=True,
+        allowed_speed_kmh=40.0,
+        eb_trigger_speed_kmh=45.0,
+    )
+
+    assert decision.emergency_brake is True
+    assert decision.reason == "eb_speed_exceeded"
+
+
+def test_emergency_braking_curve_applies_eb_near_ma():
+    decision = evaluate_atp(
+        state=_state(speed_ms=20.0, position=100.0),
+        speed_limit=80.0,
+        ma_limit=130.0,
+        power_fault=False,
+        comm_ok=True,
+    )
+
+    assert decision.emergency_brake is True
+    assert decision.reason == "emergency_braking_curve_exceeded"
+    assert decision.distance_to_authority_m == 30.0
+
+
+def test_service_braking_curve_warns_before_emergency_curve():
+    decision = evaluate_atp(
+        state=_state(speed_ms=10.0, position=100.0),
+        speed_limit=80.0,
+        ma_limit=170.0,
+        power_fault=False,
+        comm_ok=True,
+    )
+
+    assert decision.emergency_brake is False
+    assert decision.supervision_state in {"service_brake_warning", "warning"}
+    assert decision.alarm["level"] == "warning"
+
+
+def test_comm_timeout_applies_emergency_brake():
+    decision = evaluate_atp(
+        state=_state(speed_ms=5.0),
+        speed_limit=80.0,
+        ma_limit=1000.0,
+        power_fault=False,
+        comm_ok=True,
+        last_message_at=100.0,
+        now=102.0,
+    )
+
+    assert decision.emergency_brake is True
+    assert decision.reason == "communication_lost"
+
+
+def test_router_maps_signal_ma_fields_into_vehicle_atp_envelope():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+    router.handle(
+        {
+            "type": "ma_state",
+            "ma_limits": [
+                {
+                    "vehicle_id": "TRAIN-001",
+                    "ma_limit": 500.0,
+                    "distance_to_ma": 120.0,
+                    "speed_limit": 35.0,
+                    "target_speed": 30.0,
+                    "permission": "restricted",
+                    "signal_state": "yellow",
+                }
+            ],
+        }
+    )
+
+    train = manager.get_train("TRAIN-001")
+    assert train.target_distance_m == 120.0
+    assert train.allowed_speed_kmh == 35.0
+    assert train.target_speed_kmh == 30.0
+    assert train.permission == "restricted"
+    assert train.signal_state == "yellow"

@@ -10,10 +10,16 @@ from app.data_flow.data_mapper import (
     normalize_driver_input,
     normalize_ma,
     normalize_power,
+    normalize_route_request,
     normalize_section,
     normalize_signal,
     normalize_switch,
     normalize_train,
+)
+from app.data_flow.display_text import (
+    alarm_level_label,
+    alarm_source_label,
+    translate_alarm_message,
 )
 from app.data_flow.schemas import (
     AtoCommandSnapshot,
@@ -24,6 +30,7 @@ from app.data_flow.schemas import (
     MovementAuthoritySnapshot,
     PowerSnapshot,
     RouteResult,
+    RouteRequestSnapshot,
     SignalSnapshot,
     SwitchSnapshot,
     SystemStatus,
@@ -70,6 +77,7 @@ class DashboardStateStore:
         self._sections: Dict[str, TrackSectionSnapshot] = {}
         self._signals: Dict[str, SignalSnapshot] = {}
         self._switches: Dict[str, SwitchSnapshot] = {}
+        self._route_requests: Dict[str, RouteRequestSnapshot] = {}
         self._route_results: List[RouteResult] = []
         self._power = PowerSnapshot(updated_at=now)
         self._alarms: List[AlarmEvent] = []
@@ -126,6 +134,59 @@ class DashboardStateStore:
                 if normalized.get("stop_distance") is None and ma_payload.get("distance_to_ma") is not None:
                     normalized["stop_distance"] = max(0.0, float(ma_payload["distance_to_ma"]))
             self._trains[normalized["vehicle_id"]] = TrainSnapshot(**normalized)
+
+    def register_vehicle(self, data: Dict[str, Any]) -> Optional[str]:
+        normalized = normalize_train(data)
+        vehicle_id = normalized.get("vehicle_id") or normalized.get("train_id") or normalized.get("id")
+        if not vehicle_id:
+            return None
+        normalized.setdefault("vehicle_id", str(vehicle_id))
+        normalized.setdefault("line_id", "LINE-1")
+        normalized.setdefault("route_id", "R_MAIN")
+        normalized.setdefault("position", 0.0)
+        normalized.setdefault("speed", 0.0)
+        normalized.setdefault("acceleration", 0.0)
+        normalized.setdefault("mode", "manual")
+        normalized.setdefault("is_running", float(normalized.get("speed") or 0.0) > 0.0)
+        normalized.setdefault("emergency_brake", False)
+        self.update_train(str(vehicle_id), normalized)
+        return str(vehicle_id)
+
+    def replace_trains(self, trains: Iterable[Dict[str, Any]]) -> None:
+        """Replace dashboard train snapshots with a managed TrainManager list."""
+
+        now = time.time()
+        snapshots: Dict[str, TrainSnapshot] = {}
+        for item in trains:
+            raw_data = dict(item)
+            normalized = normalize_train(item)
+            vehicle_id = normalized.get("vehicle_id")
+            if not vehicle_id:
+                continue
+            normalized.setdefault("vehicle_id", vehicle_id)
+            normalized.setdefault("updated_at", now)
+            normalized.setdefault("raw_data", raw_data)
+            normalized.setdefault("is_running", bool(normalized.get("speed", 0.0)))
+            snapshots[vehicle_id] = TrainSnapshot(**normalized)
+
+        with self._lock:
+            self._trains = snapshots
+            active_ids = set(snapshots)
+            self._driver_inputs = {
+                vehicle_id: item
+                for vehicle_id, item in self._driver_inputs.items()
+                if vehicle_id in active_ids
+            }
+            self._ato_commands = {
+                vehicle_id: item
+                for vehicle_id, item in self._ato_commands.items()
+                if vehicle_id in active_ids
+            }
+            self._ma_limits = {
+                vehicle_id: item
+                for vehicle_id, item in self._ma_limits.items()
+                if vehicle_id in active_ids
+            }
 
     def update_ma_limits(self, ma_limits: Iterable[Dict[str, Any]]) -> None:
         now = time.time()
@@ -196,6 +257,33 @@ class DashboardStateStore:
                 RouteResult(**item) for item in data.get("route_results", [])
             ]
 
+    def update_route_result(self, data: Dict[str, Any]) -> None:
+        with self._lock:
+            self._route_results.append(RouteResult(**data))
+            self._route_results = self._route_results[-50:]
+
+    def update_route_request(self, data: Dict[str, Any]) -> Optional[str]:
+        now = time.time()
+        raw_data = dict(data)
+        normalized = normalize_route_request(data)
+        vehicle_id = normalized.get("vehicle_id")
+        if not vehicle_id:
+            return None
+        normalized.setdefault("route_id", "R_MAIN")
+        normalized.setdefault("priority", 0)
+        normalized.setdefault("status", "pending")
+        if normalized["status"] not in {"pending", "accepted", "rejected", "unknown"}:
+            normalized["status"] = "unknown"
+        normalized.setdefault("updated_at", now)
+        normalized.setdefault("raw_data", raw_data)
+        request_key = (
+            normalized.get("request_id")
+            or f"{normalized['vehicle_id']}:{normalized['route_id']}"
+        )
+        with self._lock:
+            self._route_requests[request_key] = RouteRequestSnapshot(**normalized)
+        return str(request_key)
+
     def update_track_info(self, data: Dict[str, Any]) -> None:
         with self._lock:
             for section in data.get("sections", []):
@@ -234,6 +322,34 @@ class DashboardStateStore:
                 "sections": sections,
             }
 
+    def get_signal_input_payload(self) -> Dict[str, Any]:
+        with self._lock:
+            train_states = [
+                {
+                    "vehicle_id": train.vehicle_id,
+                    "position": train.position,
+                    "speed": train.speed,
+                    "route_id": train.route_id,
+                    **({"train_length": train.train_length} if train.train_length is not None else {}),
+                }
+                for train in sorted(self._trains.values(), key=lambda item: item.vehicle_id)
+            ]
+            route_requests = [
+                {
+                    key: value
+                    for key, value in request.model_dump().items()
+                    if key not in {"updated_at", "raw_data"} and value is not None
+                }
+                for request in sorted(
+                    self._route_requests.values(),
+                    key=lambda item: item.request_id or f"{item.vehicle_id}:{item.route_id}",
+                )
+            ]
+            return {
+                "train_states": train_states,
+                "route_requests": route_requests,
+            }
+
     def update_power(self, data: Dict[str, Any]) -> None:
         now = time.time()
         raw_data = dict(data)
@@ -248,10 +364,14 @@ class DashboardStateStore:
     def add_alarm(self, data: Dict[str, Any]) -> None:
         now = time.time()
         payload = dict(data)
+        raw_data = dict(data)
         payload.setdefault("alarm_id", f"ALM-{int(now * 1000)}")
         payload.setdefault("timestamp", now)
         payload.setdefault("message", "Unknown alarm")
-        payload.setdefault("raw_data", dict(data))
+        payload["message"] = translate_alarm_message(payload.get("message"))
+        payload["level_label"] = alarm_level_label(payload.get("level"))
+        payload["source_label"] = alarm_source_label(payload.get("source"))
+        payload.setdefault("raw_data", raw_data)
         with self._lock:
             self._alarms.append(AlarmEvent(**payload))
             self._alarms = self._alarms[-100:]
@@ -285,6 +405,10 @@ class DashboardStateStore:
                 sections=sorted(self._sections.values(), key=lambda item: item.section_id),
                 signals=sorted(self._signals.values(), key=lambda item: item.signal_id),
                 switches=sorted(self._switches.values(), key=lambda item: item.switch_id),
+                route_requests=sorted(
+                    self._route_requests.values(),
+                    key=lambda item: item.request_id or f"{item.vehicle_id}:{item.route_id}",
+                ),
                 route_results=list(self._route_results),
                 power=self._power,
                 alarms=list(reversed(self._alarms[-20:])),

@@ -24,6 +24,11 @@ class TrainState:
     mode: Mode
     is_running: bool
     emergency_brake: bool
+    train_index: int = 0
+    edge_id: Optional[int] = None
+    section_id: Optional[str] = None
+    edge_offset_m: Optional[float] = None
+    direction_code: int = 1
 
     @property
     def speed_kmh(self) -> float:
@@ -35,6 +40,7 @@ class TrainState:
             "type": "train_state",
             "timestamp": time.time(),
             "vehicle_id": self.vehicle_id,
+            "train_index": self.train_index,
             "line_id": self.line_id,
             "position": round(self.position, 3),
             "speed": round(self.speed_kmh, 3),
@@ -42,6 +48,12 @@ class TrainState:
             "mode": self.mode,
             "is_running": self.is_running,
             "emergency_brake": self.emergency_brake,
+            "edge_id": self.edge_id,
+            "section_id": self.section_id,
+            "edge_offset_m": (
+                None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
+            ),
+            "direction_code": self.direction_code,
         }
 
 
@@ -55,6 +67,12 @@ class DriverInput:
     brake_level: int
     direction: str
     emergency_button: bool
+    command: Optional[int] = None
+    percent: Optional[float] = None
+    main_handle_state: Optional[int] = None
+    traction_percent: Optional[float] = None
+    brake_percent: Optional[float] = None
+    direction_code: Optional[int] = None
 
 
 @dataclass
@@ -67,6 +85,8 @@ class AtoCommand:
     traction_level: int
     brake_level: int
     reason: str
+    command: Optional[int] = None
+    percent: Optional[float] = None
 
 
 @dataclass
@@ -75,6 +95,11 @@ class MaLimit:
     ma_limit: float
     target_speed: Optional[float]
     reason: str
+    allowed_speed_kmh: Optional[float] = None
+    eb_trigger_speed_kmh: Optional[float] = None
+    target_distance_m: Optional[float] = None
+    permission: Optional[str] = None
+    signal_state: Optional[str] = None
 
 
 @dataclass
@@ -103,3 +128,9 @@ class TrackSection:
     speed_limit: float
     station_id: Optional[str]
     stop_position: Optional[float]
+    edge_id: Optional[int] = None
+    begin_km: Optional[float] = None
+    end_km: Optional[float] = None
+    begin_switch: Optional[str] = None
+    end_switch: Optional[str] = None
+    direction_code: int = 1
