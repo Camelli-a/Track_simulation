@@ -3,7 +3,9 @@ import threading
 import time
 
 from app.communication.message_bus import MessageBus
+from app.services.signal_ato_controller import AtoController
 from app.services.signal_control import calculate_signal_snapshot
+from app.services.signal_route_lifecycle import RouteLifecycleManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +21,18 @@ class SignalZmqAdapter:
         stale_timeout_seconds=TRAIN_STATE_STALE_TIMEOUT_SECONDS,
         publish_on_update=True,
         time_func=time.time,
+        route_lifecycle_manager=None,
+        ato_controller=None,
     ):
         self.bus = bus or MessageBus()
         self.publish_interval_seconds = publish_interval_seconds
         self.stale_timeout_seconds = stale_timeout_seconds
         self.publish_on_update = publish_on_update
         self.time_func = time_func
+        self.route_lifecycle_manager = route_lifecycle_manager or RouteLifecycleManager(
+            time_func=self.time_func
+        )
+        self.ato_controller = ato_controller or AtoController()
         self.train_states_by_id = {}
         self.train_last_update_at = {}
         self.route_requests = []
@@ -62,6 +70,13 @@ class SignalZmqAdapter:
         }
         if "train_length" in data:
             train_state["train_length"] = data["train_length"]
+        if "fault_speed_limit" in data:
+            try:
+                train_state["fault_speed_limit"] = float(data["fault_speed_limit"])
+            except (TypeError, ValueError):
+                train_state["fault_speed_limit"] = data["fault_speed_limit"]
+        if "emergency_brake" in data:
+            train_state["emergency_brake"] = self._to_bool(data["emergency_brake"])
 
         vehicle_id = train_state["vehicle_id"]
         with self.lock:
@@ -74,23 +89,36 @@ class SignalZmqAdapter:
 
     def on_route_request(self, topic: str, data: dict) -> None:
         request_type = str(data.get("request_type", "open")).strip().lower()
-        should_publish = False
+        normalized_request = None
 
         if request_type == "open":
-            should_publish = self._open_route_request(data)
+            normalized_request = self._open_route_request(data)
         elif request_type == "cancel":
-            should_publish = self._cancel_route_request(data)
+            normalized_request = self._cancel_route_request(data)
         elif request_type == "clear":
             with self.lock:
                 self.route_requests.clear()
-            should_publish = True
+                train_states = list(self.train_states_by_id.values())
+            normalized_request = {"request_type": "clear"}
         else:
             self._publish_invalid_route_request_alarm(
                 data,
                 "unsupported_request_type",
             )
 
-        if should_publish and self.publish_on_update:
+        if normalized_request is None:
+            return
+
+        if request_type != "clear":
+            with self.lock:
+                train_states = list(self.train_states_by_id.values())
+
+        self.route_lifecycle_manager.handle_route_request(
+            normalized_request,
+            train_states=train_states,
+        )
+
+        if self.publish_on_update:
             self.publish_signal_outputs()
 
     def publish_signal_outputs(self, now=None):
@@ -104,7 +132,9 @@ class SignalZmqAdapter:
         if not train_states:
             return
 
+        self.route_lifecycle_manager.update_by_train_states(train_states)
         snapshot = calculate_signal_snapshot(train_states, route_requests)
+        snapshot = self.route_lifecycle_manager.apply_locks_to_snapshot(snapshot)
         self._apply_train_state_timeout_fail_safe(snapshot, last_update_by_id, now)
 
         self.bus.publish(
@@ -115,6 +145,7 @@ class SignalZmqAdapter:
                 "sections": snapshot["sections"],
                 "switches": snapshot["switches"],
                 "route_results": snapshot["route_results"],
+                "route_states": snapshot.get("route_states", []),
             },
         )
         self.bus.publish(
@@ -123,16 +154,26 @@ class SignalZmqAdapter:
                 "ma_limits": snapshot["ma_limits"],
             },
         )
+        self.bus.publish(
+            "ato_command",
+            {
+                "commands": self.ato_controller.build_ato_commands(
+                    train_states,
+                    snapshot.get("ma_limits", []),
+                    snapshot.get("route_states", []),
+                ),
+            },
+        )
 
-    def _open_route_request(self, data: dict) -> bool:
+    def _open_route_request(self, data: dict) -> dict | None:
         vehicle_id = data.get("vehicle_id")
         route_id = data.get("route_id")
         if not vehicle_id:
             self._publish_invalid_route_request_alarm(data, "missing_vehicle_id")
-            return False
+            return None
         if not route_id:
             self._publish_invalid_route_request_alarm(data, "missing_route_id")
-            return False
+            return None
 
         request = {
             "request_id": data.get("request_id") or f"REQ-{vehicle_id}-{route_id}",
@@ -153,14 +194,14 @@ class SignalZmqAdapter:
                     break
             else:
                 self.route_requests.append(request)
-        return True
+        return request
 
-    def _cancel_route_request(self, data: dict) -> bool:
+    def _cancel_route_request(self, data: dict) -> dict | None:
         vehicle_id = data.get("vehicle_id")
         route_id = data.get("route_id")
         if not vehicle_id:
             self._publish_invalid_route_request_alarm(data, "missing_vehicle_id")
-            return False
+            return None
 
         with self.lock:
             if route_id:
@@ -178,7 +219,12 @@ class SignalZmqAdapter:
                     for request in self.route_requests
                     if request.get("vehicle_id") != vehicle_id
                 ]
-        return True
+        return {
+            "request_id": data.get("request_id"),
+            "vehicle_id": vehicle_id,
+            "route_id": route_id,
+            "request_type": "cancel",
+        }
 
     def _publish_loop(self):
         while not self.stop_event.wait(self.publish_interval_seconds):
@@ -263,3 +309,8 @@ class SignalZmqAdapter:
                 },
             },
         )
+
+    def _to_bool(self, value) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
