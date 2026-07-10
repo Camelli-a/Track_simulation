@@ -2,7 +2,7 @@ import { onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
 
-/** F3.1 键盘 Mock 控车：↑牵引 ↓制动 Space 紧急制动（前端占位，待接后端指令 API） */
+/** F3.1 键盘控车：↑牵引 ↓制动 Space 紧急制动，仅在驾驶室页启用 */
 export function useKeyboardControl(store) {
   const route = useRoute()
   const ui = useUiStore()
@@ -14,7 +14,7 @@ export function useKeyboardControl(store) {
   }
 
   function onKeydown(e) {
-    if (route.path !== '/vehicle') return
+    if (route.path !== '/cab') return
     if (!store.selectedVehicleId) return
     if (e.altKey || e.ctrlKey || e.metaKey) return
     if (isEditableTarget(e.target)) return
