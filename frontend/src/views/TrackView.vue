@@ -4,7 +4,7 @@
       <div>
         <h2 class="text-xl font-semibold">轨道仿真</h2>
         <p class="text-sm text-gray-500 mt-1">
-          电子地图 · {{ store.stations.length }} 站 · 全长 {{ (store.totalLength/1000).toFixed(1) }} km（线路数据.xls）
+          电子地图 · {{ store.stations.length }} 站 · 全长 {{ (store.totalLength/1000).toFixed(1) }} km · 拓扑图与协议元数据分层消费
         </p>
       </div>
       <ConnectionBadge :connected="store.connected" :data-stale="store.dataStale" />
@@ -18,7 +18,7 @@
     />
 
     <template v-else>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <StatusCard label="线路总长" :value="store.totalLength" unit="m" />
         <StatusCard label="闭塞分区" :value="store.trackSegments.length" unit="个" />
         <StatusCard label="车站数量" :value="store.stations.length" unit="座" />
@@ -27,6 +27,7 @@
           :value="occupiedCount"
           unit="个"
         />
+        <StatusCard label="锁闭分区" :value="lockedCount" unit="个" />
       </div>
 
       <div class="app-panel">
@@ -176,8 +177,10 @@
                 <th class="text-left">分区</th>
                 <th class="text-right">起止里程</th>
                 <th class="text-right">所属区域</th>
+                <th class="text-right">协议限速</th>
                 <th class="text-right">显示</th>
                 <th class="text-right">占用</th>
+                <th class="text-right">锁闭 / 进路</th>
                 <th class="text-right">占用列车</th>
               </tr>
             </thead>
@@ -189,16 +192,21 @@
                 <td class="text-gray-300">{{ seg.segment_id }}</td>
                 <td class="text-right text-gray-400">{{ seg.start }} – {{ seg.end }} m</td>
                 <td class="text-right text-gray-400">{{ segmentStationName(seg) }}</td>
+                <td class="text-right text-gray-400">{{ seg.speed_limit != null ? `${seg.speed_limit} km/h` : '—' }}</td>
                 <td class="text-right">
                   <span class="text-xs px-2 py-0.5 rounded-full" :class="aspectBadge(seg)">
                     {{ aspectLabel(seg) }}
                   </span>
                 </td>
                 <td class="text-right text-gray-400">{{ seg.occupied ? '是' : '否' }}</td>
+                <td class="text-right text-gray-400">
+                  {{ seg.locked ? '锁闭' : '—' }}
+                  <span v-if="seg.locked_by_route_id"> / {{ seg.locked_by_route_id }}</span>
+                </td>
                 <td class="text-right text-gray-400">{{ seg.occupied_by ?? '—' }}</td>
               </tr>
               <tr v-if="!filteredSegments.length">
-                <td colspan="6" class="py-8 text-center text-gray-600">
+                <td colspan="8" class="py-8 text-center text-gray-600">
                   当前筛选条件下没有匹配的区段，请尝试切回“全部区段”或更换车站范围。
                 </td>
               </tr>
@@ -273,6 +281,14 @@ const occupiedCount = computed(() =>
   store.trackSegments.filter((s) => s.occupied).length
 )
 
+const lockedCount = computed(() =>
+  store.trackSegments.filter((segment) => segment.locked).length
+)
+
+const stationNameById = computed(() =>
+  new Map(store.stations.map((station) => [station.station_id, station.name]))
+)
+
 const stationRanges = computed(() =>
   store.stations.map((station, index) => ({
     ...station,
@@ -302,9 +318,13 @@ const statusFilterLabel = computed(() => {
 const filteredSegments = computed(() =>
   store.trackSegments.filter((segment) => {
     if (activeStation.value) {
-      const center = ((segment.start ?? 0) + (segment.end ?? 0)) / 2
-      if (center < activeStation.value.start || center > activeStation.value.end) {
-        return false
+      if (segment.station_id) {
+        if (segment.station_id !== activeStation.value.station_id) return false
+      } else {
+        const center = ((segment.start ?? 0) + (segment.end ?? 0)) / 2
+        if (center < activeStation.value.start || center > activeStation.value.end) {
+          return false
+        }
       }
     }
 
@@ -388,6 +408,10 @@ const segmentChartOption = computed(() => ({
 }))
 
 function segmentStationName(segment) {
+  if (segment.station_id) {
+    const stationName = stationNameById.value.get(segment.station_id)
+    return stationName ? `${stationName} (${segment.station_id})` : segment.station_id
+  }
   const center = ((segment.start ?? 0) + (segment.end ?? 0)) / 2
   const station = stationRanges.value.find((item) => center >= item.start && center <= item.end)
   return station?.name ?? '区间'

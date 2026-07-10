@@ -31,6 +31,8 @@ const props = defineProps({
   powerFault: { type: Boolean, default: false },
   lastError: { type: String, default: null },
   alarms: { type: Array, default: () => [] },
+  commState: { type: Object, default: null },
+  routeResults: { type: Array, default: () => [] },
 })
 
 const LEVEL_ICON = {
@@ -80,6 +82,35 @@ const allAlerts = computed(() => {
     })
   }
 
+  const deniedRoutes = props.routeResults.filter((result) => !result.allowed)
+  if (deniedRoutes.length) {
+    const first = deniedRoutes[0]
+    list.push({
+      key: 'route-conflicts',
+      level: 'warn',
+      icon: '⛔',
+      source: 'SIGNAL',
+      message: `${deniedRoutes.length} 项进路申请未通过联锁校验`,
+      action: first?.required_switch_id ? `优先核对道岔 ${first.required_switch_id}` : '请在全线态势页查看详情',
+      detail: first?.reason ?? null,
+    })
+  }
+
+  if (props.commState?.last_message_at) {
+    const ageMs = Date.now() - toEpochMs(props.commState.last_message_at)
+    if (ageMs > 5000) {
+      list.push({
+        key: 'comm-stale',
+        level: 'warn',
+        icon: '📡',
+        source: 'COMM',
+        message: '协议链路最近一条消息已超 5s 未刷新',
+        action: '请检查上游仿真数据发布是否停滞',
+        detail: `${Math.floor(ageMs / 1000)}s`,
+      })
+    }
+  }
+
   if (props.systemMode === 'emergency') {
     list.push({ key: 'sys-emergency', level: 'error', icon: '🚨', message: '系统处于紧急模式', action: '请优先确认列车与供电安全状态' })
   } else if (props.systemMode === 'degraded') {
@@ -103,5 +134,11 @@ function alertClass(level) {
   if (level === 'error') return 'border-red-400/20 bg-red-500/10 text-red-100'
   if (level === 'warn') return 'border-amber-400/20 bg-amber-500/10 text-amber-100'
   return 'border-cyan-400/20 bg-cyan-500/10 text-cyan-100'
+}
+
+function toEpochMs(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return Date.now()
+  return numeric > 1e12 ? numeric : numeric * 1000
 }
 </script>
