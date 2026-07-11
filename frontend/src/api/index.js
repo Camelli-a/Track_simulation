@@ -9,7 +9,9 @@ const http = axios.create({
 http.interceptors.response.use(
   (res) => res.data,
   (err) => {
-    console.error('[API Error]', err.response?.status, err.message)
+    if (!err.config?.suppressErrorLog) {
+      console.error('[API Error]', err.response?.status, err.message)
+    }
     return Promise.reject(err)
   }
 )
