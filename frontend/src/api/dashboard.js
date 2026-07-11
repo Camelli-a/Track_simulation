@@ -6,3 +6,10 @@ import http from '@/api/index'
 export function fetchDashboardSnapshot() {
   return http.get('/dashboard/snapshot')
 }
+
+/**
+ * 手动触发后端发布当前 track_info 到消息总线
+ */
+export function publishTrackInfo() {
+  return http.post('/dashboard/publish-track-info')
+}

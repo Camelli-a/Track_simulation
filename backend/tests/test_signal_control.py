@@ -107,9 +107,9 @@ def test_far_from_ma_is_allow_green():
     ma_limit = _ma_for(snapshot, "TRAIN-001")
     assert ma_limit["permission"] == "allow"
     assert ma_limit["signal_state"] == "green"
-    assert ma_limit["speed_limit"] == 60.0
+    assert ma_limit["speed_limit"] == 48.0
     assert ma_limit["route_speed_limit"] == 80.0
-    assert ma_limit["static_speed_limit"] == 60.0
+    assert ma_limit["static_speed_limit"] == 48.0
     assert ma_limit["static_speed_limit_id"] == "SL-001"
     assert ma_limit["speed_limit_reason"] == "static_limit"
 
@@ -181,8 +181,10 @@ def test_ma_limit_includes_static_speed_limit():
     )
 
     ma_limit = _ma_for(snapshot, "TRAIN-001")
-    assert ma_limit["static_speed_limit"] == 60.0
+    assert ma_limit["static_speed_limit"] == 48.0
     assert ma_limit["static_speed_limit_id"] == "SL-001"
+    assert ma_limit["static_speed_limit_source"] == "teacher_static_speed_limit_table"
+    assert ma_limit["static_speed_limit_related_switch_id"] is None
     assert "speed_limit_reason" in ma_limit
 
 
@@ -200,7 +202,7 @@ def test_static_limit_caps_speed_limit():
 
     ma_limit = _ma_for(snapshot, "TRAIN-001")
     assert ma_limit["permission"] == "allow"
-    assert ma_limit["speed_limit"] == 60.0
+    assert ma_limit["speed_limit"] == 48.0
     assert ma_limit["speed_limit_reason"] == "static_limit"
 
 

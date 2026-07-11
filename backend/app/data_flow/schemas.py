@@ -5,7 +5,19 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-DataSource = Literal["mock", "udp", "zmq", "frontend", "unknown"]
+DataSource = Literal[
+    "mock",
+    "udp",
+    "zmq",
+    "frontend",
+    "vehicle_udp",
+    "vehicle_api",
+    "driver_tcp",
+    "signal_zmq",
+    "power_adapter",
+    "track_adapter",
+    "unknown",
+]
 SystemState = Literal["running", "degraded", "emergency", "offline"]
 TrainMode = Literal["manual", "ato", "atp", "emergency", "unknown"]
 SignalLightState = Literal["red", "yellow", "green", "unknown"]
@@ -33,6 +45,7 @@ class SystemStatus(BaseModel):
     data_source: DataSource = "mock"
     zmq_connected: bool = False
     websocket_clients: int = 0
+    degraded_reasons: List[str] = Field(default_factory=list)
 
 
 class CommunicationStatus(BaseModel):
@@ -43,6 +56,8 @@ class CommunicationStatus(BaseModel):
     latency_ms: Optional[float] = None
     packet_loss_count: int = 0
     last_message_at: Optional[float] = None
+    last_real_message_at: Optional[float] = None
+    no_message_seconds: Optional[float] = None
 
 
 class DriverInput(BaseModel):
@@ -55,6 +70,11 @@ class DriverInput(BaseModel):
     control_mode: Literal["manual", "ato"] = "manual"
     emergency_button: bool = False
     updated_at: float
+    received_at: Optional[float] = None
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -66,9 +86,24 @@ class TrainSnapshot(BaseModel):
     speed: float = 0.0
     acceleration: float = 0.0
     train_length: Optional[float] = None
+    train_index: Optional[int] = None
+    mileage: Optional[float] = None
+    direction_code: Optional[int] = None
+    active_cab: Optional[int] = None
+    edge_id: Optional[int] = None
+    section_id: Optional[str] = None
+    edge_offset_m: Optional[float] = None
     mode: TrainMode = "unknown"
     is_running: bool = True
     emergency_brake: bool = False
+    fault_speed_limit: Optional[float] = None
+    traction_level: Optional[int] = None
+    brake_level: Optional[int] = None
+    door_mode: Optional[str] = None
+    door_closed_light: Optional[bool] = None
+    ato_active: Optional[bool] = None
+    parking_apply: Optional[bool] = None
+    parking_release: Optional[bool] = None
     ma_limit: Optional[float] = None
     distance_to_ma: Optional[float] = None
     permission: MovementPermission = "unknown"
@@ -90,6 +125,12 @@ class TrainSnapshot(BaseModel):
     stop_error_cm: Optional[float] = None
     platform_id: Optional[str] = None
     updated_at: float
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -110,16 +151,31 @@ class TrackSectionSnapshot(BaseModel):
     locked: bool = False
     locked_by_route_id: Optional[str] = None
     condition: SectionCondition = "normal"
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
 
 
 class SignalSnapshot(BaseModel):
     signal_id: str
-    position: float
+    position: float = 0.0
     state: SignalLightState = "unknown"
+    color_code: Optional[int] = None
+    section_id: Optional[str] = None
+    direction: Optional[str] = None
     signal_type: Optional[str] = None
     route_id: Optional[str] = None
     signal_state: SignalLightState = "unknown"
     permission: MovementPermission = "unknown"
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
 
 
 class SwitchSnapshot(BaseModel):
@@ -132,6 +188,12 @@ class SwitchSnapshot(BaseModel):
     locked_by_route_id: Optional[str] = None
     related_section: Optional[str] = None
     reason: Optional[str] = None
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
 
 
 class RouteResult(BaseModel):
@@ -186,6 +248,12 @@ class MovementAuthoritySnapshot(BaseModel):
     braking_curve_speed_limit: Optional[float] = None
     braking_model: Optional[str] = None
     updated_at: float
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -199,6 +267,12 @@ class AtoCommandSnapshot(BaseModel):
     brake_level: int = 0
     reason: str = "test"
     updated_at: float
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -209,6 +283,12 @@ class PowerSnapshot(BaseModel):
     power: float = 0.0
     is_fault: bool = False
     updated_at: Optional[float] = None
+    received_at: Optional[float] = None
+    source: DataSource = "unknown"
+    protocol: Optional[str] = None
+    adapter: Optional[str] = None
+    is_stale: bool = False
+    stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -221,6 +301,17 @@ class AlarmEvent(BaseModel):
     vehicle_id: Optional[str] = None
     message: str
     timestamp: float
+    raw_data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CommandAckSnapshot(BaseModel):
+    command_id: Optional[str] = None
+    topic: str = "unknown"
+    vehicle_id: Optional[str] = None
+    accepted: bool = False
+    status: str = "unknown"
+    reason: Optional[str] = None
+    updated_at: float
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -239,6 +330,7 @@ class DashboardSnapshot(BaseModel):
     switches: List[SwitchSnapshot] = Field(default_factory=list)
     route_requests: List[RouteRequestSnapshot] = Field(default_factory=list)
     route_results: List[RouteResult] = Field(default_factory=list)
+    command_acks: List[CommandAckSnapshot] = Field(default_factory=list)
     power: PowerSnapshot = Field(default_factory=PowerSnapshot)
     alarms: List[AlarmEvent] = Field(default_factory=list)
 

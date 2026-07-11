@@ -121,9 +121,16 @@
               class="flex items-center gap-2 min-h-0 leading-tight"
               :style="{ height: `${rowSlotH}px` }"
             >
-              <span class="text-xs text-emerald-200/90 font-medium truncate">
+              <button
+                type="button"
+                class="rounded-full border px-2 py-0.5 text-left text-xs font-medium transition-colors"
+                :class="st.station_id === selectedStationId
+                  ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-100'
+                  : 'border-transparent text-emerald-200/90 hover:border-white/10 hover:bg-white/5'"
+                @click="$emit('select-station', st.station_id)"
+              >
                 {{ stationLabel(st.name) }}
-              </span>
+              </button>
               <span class="text-[10px] text-gray-500 shrink-0">{{ st.name }}</span>
             </div>
           </div>
@@ -139,6 +146,7 @@
         彩色块 = 在线列车（点击选中）
       </span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full border border-emerald-400" /> 车站</span>
+      <span class="text-gray-400">点击站名可展开站场视图</span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400" /> 空闲区段</span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500" /> 占用</span>
       <span
@@ -165,11 +173,12 @@ const props = defineProps({
   vehicles: { type: Array, default: () => [] },
   totalLength: { type: Number, default: 47500 },
   selectedId: { type: String, default: null },
+  selectedStationId: { type: String, default: null },
   color: { type: Function, required: true },
   motionPaused: { type: Boolean, default: false },
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'select-station'])
 
 const { displayVehicles } = useTrainInterpolation(toRef(props, 'vehicles'), {
   totalLength: toRef(props, 'totalLength'),
