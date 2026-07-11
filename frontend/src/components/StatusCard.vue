@@ -1,11 +1,12 @@
 <!-- 通用状态数值卡片 -->
 <template>
-  <div class="rounded-xl bg-gray-800 p-4">
-    <p class="text-xs text-gray-400 mb-1">{{ label }}</p>
-    <p class="text-2xl font-bold">
+  <div class="app-stat-card">
+    <p class="app-stat-label">{{ label }}</p>
+    <p class="app-stat-value">
       {{ value }}
-      <span v-if="unit" class="text-sm font-normal text-gray-400 ml-1">{{ unit }}</span>
+      <span v-if="unit" class="ml-1 text-sm font-normal text-slate-400">{{ unit }}</span>
     </p>
+    <div class="mt-3 h-px bg-gradient-to-r from-cyan-300/25 via-white/8 to-transparent" />
   </div>
 </template>
 

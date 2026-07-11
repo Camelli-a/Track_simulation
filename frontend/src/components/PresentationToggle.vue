@@ -1,12 +1,13 @@
 <template>
   <button
     type="button"
-    class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+    class="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-medium tracking-wide transition-all duration-200"
     :class="ui.presentationMode
-      ? 'border-sky-600 bg-sky-950 text-sky-400'
-      : 'border-gray-700 text-gray-400 hover:border-gray-500'"
+      ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100'
+      : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-cyan-400/30 hover:text-white'"
     @click="ui.togglePresentation()"
   >
+    <span class="text-sm">{{ ui.presentationMode ? '◱' : '⤢' }}</span>
     {{ ui.presentationMode ? '退出演示' : '演示模式' }}
   </button>
 </template>

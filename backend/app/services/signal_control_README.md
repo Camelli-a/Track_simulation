@@ -159,7 +159,7 @@ ma_state
 - `section.start` / `section.end` 当前是按表格顺序累计得到的一维近似坐标。
 - `signal.position` 当前也是累计坐标近似。
 - `required_switches` 第一版仍以人工配置为主。
-- `speed_limit` 第一版统一默认，尚未接静态限速表。
+- `STATIC_SPEED_LIMITS` 已从老师 Excel 静态限速表离线抽取为 Python 常量。
 - `side_speed_limit` 单位后续需要结合课程数据定义确认。
 
 ## 6. MA 计算逻辑
@@ -355,18 +355,128 @@ ZMQ 包装格式由 `MessageBus` 自动生成：
 - 当前使用一维线路坐标。
 - `section.start` / `section.end` 是按表格顺序累计的近似坐标。
 - 真实 Seg 拓扑寻路尚未实现。
-- `route_request` 暂未通过 ZMQ 接入。
+- `route_request` 已通过 ZMQ 接入，但尚未实现工业级完整进路生命周期。
 - `required_switches` 尚未从真实进路自动推断。
-- 静态限速表、坡度表、保护区段表暂未接入。
+- 静态限速表已接入；坡度表已用于 ATO 停车曲线修正；保护区段表暂未接入。
 - 制动模型为简化匀减速模型，不是工业级安全制动模型。
 - 本系统用于课程设计仿真，不是 SIL4 安全级实现。
 
 后续可扩展：
 
-- 接入 `route_request` topic。
-- 接入静态限速表。
-- 接入坡度表修正制动距离。
+- 完善 `route_request` 的真实联锁表推断和释放规则。
+- 接入道岔侧向限速。
+- 后续可将坡度表进一步接入 MA/ATP 制动距离修正。
 - 根据 Seg 邻接关系生成真实拓扑里程。
 - 自动推断进路 `required_switches`。
 - 增加完整进路锁闭 / 解锁生命周期。
 - 与车辆 ATP / ATO 模块联动。
+
+## 静态限速第一版接入
+
+`signal_track_config.py` 当前的 `STATIC_SPEED_LIMITS` 来自老师 Excel 静态限速表的离线抽取，共覆盖老师表中的静态限速区间。
+
+老师表原始字段包括：限速区段所处 Seg 编号、起点/终点 Seg 偏移量、关联道岔编号和限速值。当前实现按以下规则统一：
+
+- 老师表限速值按 `cm/s * 0.036` 转换为 `km/h`，例如 `1333 cm/s ≈ 48.0 km/h`。
+- 起点/终点偏移量按 `cm / 100` 转换为 `m`。
+- `start` / `end` 使用当前系统的一维累计 position 坐标，暂不做完整 Seg 图搜索。
+- 本轮只接入静态线路限速，道岔侧向限速后续单独接入。
+
+`ma_state.ma_limits[]` 新增以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `static_speed_limit` | 当前 position 命中的静态线路限速 |
+| `static_speed_limit_id` | 当前命中的静态限速区间 ID |
+| `static_speed_limit_source` | 当前命中的静态限速来源 |
+| `static_speed_limit_related_switch_id` | 老师表中的关联道岔编号，缺失时为 `None` |
+| `fault_speed_limit` | train_state 或 704 映射输入中的故障限速 |
+| `speed_limit_reason` | 当前主导限速原因 |
+
+最终 `speed_limit` 是安全速度上限，综合：
+
+- `route_speed_limit`
+- `static_speed_limit`
+- `fault_speed_limit`
+- `braking_curve_speed_limit`
+
+当 `emergency_brake=True` 时，信号输出会直接进入 `stop / red / speed_limit=0`，`speed_limit_reason = emergency_brake`。
+
+ATO/车辆控制模块后续应直接使用 `ma_state.speed_limit` 作为安全速度上限，并在该上限内做牵引、惰行和制动控制；不应绕过信号模块重新判断联锁安全。
+
+## ATO 基础模块与 ato_command
+
+第一版 ATO 模块位于 `signal_ato_controller.py`，职责是在 `ma_state.speed_limit` 安全上限内生成智能驾驶建议，不直接更新车辆动力学。
+
+当前包含：
+
+- 线路静态配置提供的 `STOP_TARGETS`
+- 简化停车曲线 `v = sqrt(2 * a * distance)`
+- 基础 `PIDController`
+- ATO 状态：`cruise` / `approach_station` / `braking_to_stop` / `creep` / `holding` / `degraded`
+- ZMQ topic：`ato_command`
+
+`ato_command.data` 结构：
+
+```json
+{
+  "commands": [
+    {
+      "vehicle_id": "TRAIN-001",
+      "control_mode": "ATO",
+      "ato_state": "braking_to_stop",
+      "target_speed": 18.5,
+      "safe_speed_limit": 40.0,
+      "stop_curve_speed_limit": 18.5,
+      "current_speed": 35.0,
+      "target_position": 1200.0,
+      "distance_to_target": 150.0,
+      "station_id": "ST-01",
+      "target_id": "STOP-ST-001-PF-001-R-MAIN",
+      "station_name": "GGZ",
+      "platform_id": "PF-001",
+      "platform_name": "GGZ-P01",
+      "stop_target_source": "teacher_platform_table",
+      "gradient": -3.5,
+      "gradient_id": "GR-002",
+      "gradient_unit": "permille",
+      "effective_deceleration": 0.766,
+      "traction_level": 0,
+      "brake_level": 2,
+      "holding_brake": false,
+      "selected_strategy": "comfort_brake",
+      "score": 0.82,
+      "strategy_scores": [
+        {"strategy": "conservative_brake", "target_speed": 13.8, "score": 0.76},
+        {"strategy": "comfort_brake", "target_speed": 16.5, "score": 0.82}
+      ],
+      "reason": "stop_curve_braking"
+    }
+  ]
+}
+```
+
+`STOP_TARGETS` 当前由 `signal_track_config.py` 统一提供，优先来源为老师 Excel 中的车站表 / 站台表。第一版按站台中心公里标生成停车点，并用 `route.start <= platform.position <= route.end` 将站台与进路关联；无法匹配时后续可 fallback 到 `route.end` / `end_signal_id`。ATO 使用 `STOP_TARGETS` 计算停车曲线，不直接更新车辆位置；停车精度后续由 `stop_result` 评价。
+
+`GRADIENT_PROFILE` 当前由老师 Excel 坡度表离线抽取生成。坡度按千分坡 `permille` 处理，第一版将 `0x55` 视为上坡、`0xaa` 视为下坡。ATO 会按当前位置查询坡度并修正 `effective_deceleration`：上坡增大有效制动减速度，下坡减小有效制动减速度。该修正只影响 ATO 停车曲线和目标速度策略，暂不修改 MA/ATP 安全边界。
+
+`target_speed` 始终不超过 `safe_speed_limit`。车辆模块后续订阅 `ato_command` 后自行执行动力学；本模块不替代车辆模型，也不做真实深度学习训练。
+
+### ATO AI 多目标评分模型
+
+当前 AI 优化是可解释的规则评分模型，不引入外部机器学习库，也不做深度学习训练。优化器在安全限速内生成候选策略并评分：
+
+- `conservative_brake`：更早制动，安全裕度更大。
+- `comfort_brake`：平滑制动，兼顾停车和舒适。
+- `energy_saving`：距离较远时减少牵引/制动切换。
+- `precise_stop`：接近停车点时更重视停车精度。
+
+评分目标包括：
+
+- 停车精度
+- 乘坐舒适度
+- 节能
+- 运行效率
+- 超速/MA 违规惩罚
+
+优化器只选择 `target_speed`、`selected_strategy`、`score` 和 `strategy_scores`；PIDController 仍负责根据目标速度输出牵引/制动级位。所有候选与最终 `target_speed` 都必须满足 `target_speed <= ma_state.speed_limit`。

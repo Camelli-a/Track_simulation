@@ -230,7 +230,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
+import { ref, computed, watch, toRef } from 'vue'
 import { useSvgPanZoom } from '@/composables/useSvgPanZoom'
 import { useTrainInterpolation } from '@/composables/useTrainInterpolation'
 import { lerpAngle } from '@/utils/interpolate'
@@ -315,27 +315,22 @@ function refreshTrainMarkers() {
   trainMarkers.value = spreadTrainMarkers(raw)
 }
 
+watch(displayVehicles, refreshTrainMarkers, { immediate: true })
 watch(() => props.graph?.edges, refreshTrainMarkers)
+watch(() => props.blocks, refreshTrainMarkers, { deep: true })
 
-let followRaf = null
-function renderLoop() {
-  refreshTrainMarkers()
-  if (followTrain.value && props.selectedId && !dragging.value) {
-    const t = trainMarkers.value.find((m) => m.vehicle_id === props.selectedId)
-    if (t) {
-      smoothPanToWorld(t.x + (t.offsetX ?? 0), t.y + (t.offsetY ?? 0), 0.12)
-    }
-  }
-  followRaf = requestAnimationFrame(renderLoop)
-}
+const followedTrainMarker = computed(() =>
+  trainMarkers.value.find((marker) => marker.vehicle_id === props.selectedId) ?? null
+)
 
-onMounted(() => {
-  followRaf = requestAnimationFrame(renderLoop)
-})
-
-onBeforeUnmount(() => {
-  if (followRaf) cancelAnimationFrame(followRaf)
-})
+watch(
+  [followedTrainMarker, followTrain, dragging],
+  ([marker, shouldFollow, isDragging]) => {
+    if (!marker || !shouldFollow || isDragging) return
+    smoothPanToWorld(marker.x + (marker.offsetX ?? 0), marker.y + (marker.offsetY ?? 0), 0.12)
+  },
+  { immediate: true },
+)
 
 const gridLines = computed(() => {
   const b = bounds.value

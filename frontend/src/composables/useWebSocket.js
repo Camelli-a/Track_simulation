@@ -4,6 +4,7 @@ const DEFAULT_RECONNECT_MS = 3000
 
 export function useWebSocket(url) {
   const connected = ref(false)
+  const connecting = ref(false)
   const lastError = ref(null)
 
   let socket = null
@@ -14,19 +15,28 @@ export function useWebSocket(url) {
   function connect(onMessage) {
     shouldReconnect = true
     onMessageHandler = onMessage
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+      return
+    }
     openSocket()
   }
 
   function openSocket() {
-    if (socket?.readyState === WebSocket.OPEN) return
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const endpoint = url.startsWith('ws') ? url : `${protocol}//${window.location.host}${url}`
 
+    connecting.value = true
     socket = new WebSocket(endpoint)
 
     socket.onopen = () => {
       connected.value = true
+      connecting.value = false
       lastError.value = null
     }
 
@@ -40,13 +50,15 @@ export function useWebSocket(url) {
     }
 
     socket.onerror = () => {
+      connecting.value = false
       lastError.value = '连接异常'
     }
 
     socket.onclose = () => {
       connected.value = false
+      connecting.value = false
       socket = null
-      if (shouldReconnect) {
+      if (shouldReconnect && !reconnectTimer) {
         reconnectTimer = window.setTimeout(openSocket, DEFAULT_RECONNECT_MS)
       }
     }
@@ -54,6 +66,7 @@ export function useWebSocket(url) {
 
   function disconnect() {
     shouldReconnect = false
+    connecting.value = false
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -63,5 +76,5 @@ export function useWebSocket(url) {
     connected.value = false
   }
 
-  return { connected, lastError, connect, disconnect }
+  return { connected, connecting, lastError, connect, disconnect }
 }
