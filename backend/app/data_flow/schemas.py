@@ -28,6 +28,37 @@ SectionAspect = Literal["green", "yellow", "red", "unknown"]
 SwitchPosition = Literal["normal", "reverse", "unknown"]
 AlarmLevel = Literal["info", "warning", "critical"]
 RouteRequestStatus = Literal["pending", "accepted", "rejected", "unknown"]
+PrimaryChart = Literal[
+    "speed_distance",
+    "speed_time",
+    "line_overview",
+    "ma_distance",
+    "atp_margin_chart",
+    "stop_result_chart",
+    "event_timeline",
+    "driver_input_timeline",
+]
+PanelId = Literal[
+    "target_vehicle_summary",
+    "network_impact_summary",
+    "stop_target",
+    "signal_status",
+    "ma_status",
+    "atp_status",
+    "control_output",
+    "driver_input",
+    "affected_vehicles",
+    "blocked_section",
+    "event_timeline",
+    "driver_input_timeline",
+    "stop_result",
+    "external_system_status",
+    "recommended_speed",
+]
+IntegrationMode = Literal["simulation", "realtime", "hybrid", "degraded"]
+RealtimeChannel = Literal["websocket", "rest_polling", "zmq", "none"]
+TrackType = Literal["main", "arrival_departure", "siding", "turnback", "platform", "depot", "unknown"]
+GeometryType = Literal["point", "polyline"]
 
 
 class IncomingMessage(BaseModel):
@@ -46,6 +77,23 @@ class SystemStatus(BaseModel):
     zmq_connected: bool = False
     websocket_clients: int = 0
     degraded_reasons: List[str] = Field(default_factory=list)
+
+
+class ExternalConnections(BaseModel):
+    power: bool = False
+    signal_screen: bool = False
+    cab_screen: bool = False
+    viewer_3d: bool = False
+    driver_desk: bool = False
+
+
+class IntegrationStatus(BaseModel):
+    integration_mode: IntegrationMode = "simulation"
+    realtime_channel: RealtimeChannel = "websocket"
+    driver_desk_connected: bool = False
+    external_connections: ExternalConnections = Field(default_factory=ExternalConnections)
+    degraded: bool = False
+    last_realtime_message_at: Optional[float] = None
 
 
 class CommunicationStatus(BaseModel):
@@ -92,6 +140,8 @@ class TrainSnapshot(BaseModel):
     active_cab: Optional[int] = None
     edge_id: Optional[int] = None
     section_id: Optional[str] = None
+    station_id: Optional[str] = None
+    track_id: Optional[str] = None
     edge_offset_m: Optional[float] = None
     mode: TrainMode = "unknown"
     is_running: bool = True
@@ -138,6 +188,7 @@ class TrackSectionSnapshot(BaseModel):
     section_id: str
     line_id: str = "LINE-1"
     track_seg_id: Optional[str] = None
+    track_id: Optional[str] = None
     start: float
     end: float
     gradient: Optional[float] = None
@@ -164,10 +215,14 @@ class SignalSnapshot(BaseModel):
     position: float = 0.0
     state: SignalLightState = "unknown"
     color_code: Optional[int] = None
+    station_id: Optional[str] = None
+    track_id: Optional[str] = None
     section_id: Optional[str] = None
     direction: Optional[str] = None
     signal_type: Optional[str] = None
     route_id: Optional[str] = None
+    protects_switch_id: Optional[str] = None
+    protects_section_id: Optional[str] = None
     signal_state: SignalLightState = "unknown"
     permission: MovementPermission = "unknown"
     received_at: Optional[float] = None
@@ -182,6 +237,11 @@ class SwitchSnapshot(BaseModel):
     switch_id: str
     position: SwitchPosition = "unknown"
     turnout_id: Optional[str] = None
+    station_id: Optional[str] = None
+    switch_type: Optional[str] = None
+    connects: List[str] = Field(default_factory=list)
+    normal_to: Optional[str] = None
+    reverse_to: Optional[str] = None
     routing: SwitchPosition = "unknown"
     state: SwitchPosition = "unknown"
     locked: bool = False
@@ -315,12 +375,99 @@ class CommandAckSnapshot(BaseModel):
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ScenarioPageConfig(BaseModel):
+    hero_panel: PanelId = "target_vehicle_summary"
+    primary_chart: PrimaryChart = "speed_distance"
+    secondary_chart: Optional[PrimaryChart] = None
+    panels: List[PanelId] = Field(default_factory=list)
+    key_metrics: List[str] = Field(default_factory=list)
+    highlight_events: List[str] = Field(default_factory=list)
+
+
+class ScenarioConfig(BaseModel):
+    scenario_id: str
+    name: str
+    description: Optional[str] = None
+    page_config: ScenarioPageConfig
+
+
+class LayoutGeometry(BaseModel):
+    type: GeometryType = "point"
+    x: Optional[float] = None
+    y: Optional[float] = None
+    points: List[List[float]] = Field(default_factory=list)
+
+
+class YardTrack(BaseModel):
+    track_id: str
+    track_name: str
+    station_id: str
+    track_type: TrackType = "unknown"
+    direction: Optional[str] = None
+    section_ids: List[str] = Field(default_factory=list)
+    geometry: Optional[LayoutGeometry] = None
+
+
+class YardSwitch(BaseModel):
+    switch_id: str
+    station_id: str
+    switch_type: str = "single"
+    connects: List[str] = Field(default_factory=list)
+    normal_to: Optional[str] = None
+    reverse_to: Optional[str] = None
+    geometry: Optional[LayoutGeometry] = None
+
+
+class YardSignal(BaseModel):
+    signal_id: str
+    station_id: str
+    track_id: Optional[str] = None
+    direction: Optional[str] = None
+    protects_switch_id: Optional[str] = None
+    protects_section_id: Optional[str] = None
+    geometry: Optional[LayoutGeometry] = None
+
+
+class YardSection(BaseModel):
+    section_id: str
+    station_id: str
+    track_id: Optional[str] = None
+    start: Optional[float] = None
+    end: Optional[float] = None
+    geometry: Optional[LayoutGeometry] = None
+
+
+class YardStation(BaseModel):
+    station_id: str
+    station_name: str
+    track_ids: List[str] = Field(default_factory=list)
+    switch_ids: List[str] = Field(default_factory=list)
+    signal_ids: List[str] = Field(default_factory=list)
+    section_ids: List[str] = Field(default_factory=list)
+    tracks: List[YardTrack] = Field(default_factory=list)
+    switches: List[YardSwitch] = Field(default_factory=list)
+    signals: List[YardSignal] = Field(default_factory=list)
+    sections: List[YardSection] = Field(default_factory=list)
+
+
+class YardLayoutSnapshot(BaseModel):
+    line_id: str = "LINE-1"
+    stations: List[YardStation] = Field(default_factory=list)
+    yard_tracks: List[YardTrack] = Field(default_factory=list)
+    yard_switches: List[YardSwitch] = Field(default_factory=list)
+    yard_signals: List[YardSignal] = Field(default_factory=list)
+    yard_sections: List[YardSection] = Field(default_factory=list)
+    updated_at: Optional[float] = None
+
+
 class DashboardSnapshot(BaseModel):
     type: Literal["dashboard_snapshot"] = "dashboard_snapshot"
     protocol_version: str = "1.0"
     timestamp: float
     system: SystemStatus
     communication: CommunicationStatus
+    integration: IntegrationStatus = Field(default_factory=IntegrationStatus)
+    scenarios: List[ScenarioConfig] = Field(default_factory=list)
     driver_inputs: List[DriverInput] = Field(default_factory=list)
     ato_commands: List[AtoCommandSnapshot] = Field(default_factory=list)
     trains: List[TrainSnapshot] = Field(default_factory=list)

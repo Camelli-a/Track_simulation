@@ -28,15 +28,19 @@ from app.data_flow.schemas import (
     CommunicationStatus,
     DashboardSnapshot,
     DriverInput,
+    ExternalConnections,
+    IntegrationStatus,
     MovementAuthoritySnapshot,
     PowerSnapshot,
     RouteResult,
     RouteRequestSnapshot,
+    ScenarioConfig,
     SignalSnapshot,
     SwitchSnapshot,
     SystemStatus,
     TrackSectionSnapshot,
     TrainSnapshot,
+    YardLayoutSnapshot,
 )
 
 
@@ -130,6 +134,87 @@ STALE_AFTER_SECONDS = {
 ZMQ_HEALTH_TIMEOUT_SECONDS = 3.0
 ALARM_STATUS_WINDOW_SECONDS = 5.0
 
+SCENARIO_CONFIGS = [
+    ScenarioConfig(
+        scenario_id="normal_stop",
+        name="Normal station stop",
+        description="Train approaches a station and stops at the target platform.",
+        page_config={
+            "hero_panel": "target_vehicle_summary",
+            "primary_chart": "speed_distance",
+            "secondary_chart": "speed_time",
+            "panels": ["stop_target", "control_output", "stop_result"],
+            "key_metrics": ["speed_kmh", "target_speed_kmh", "remaining_distance_m", "stop_error_cm"],
+            "highlight_events": ["approach_started", "service_brake_started", "stop_completed"],
+        },
+    ),
+    ScenarioConfig(
+        scenario_id="red_signal_stop",
+        name="Red signal stop",
+        description="Signal changes to stop, MA is shortened, and the train brakes before the boundary.",
+        page_config={
+            "hero_panel": "target_vehicle_summary",
+            "primary_chart": "speed_distance",
+            "secondary_chart": "event_timeline",
+            "panels": ["signal_status", "ma_status", "control_output", "stop_result"],
+            "key_metrics": ["signal_state", "ma_limit_m", "distance_to_ma_m", "recommended_speed_kmh"],
+            "highlight_events": ["signal_red", "ma_updated", "brake_command_sent", "stop_completed"],
+        },
+    ),
+    ScenarioConfig(
+        scenario_id="ma_shrink",
+        name="MA shrink",
+        description="Movement authority shrinks while a train is running.",
+        page_config={
+            "hero_panel": "target_vehicle_summary",
+            "primary_chart": "speed_distance",
+            "secondary_chart": "atp_margin_chart",
+            "panels": ["ma_status", "atp_status", "control_output", "stop_result"],
+            "key_metrics": ["old_ma_limit_m", "new_ma_limit_m", "distance_to_ma_m", "recommended_speed_kmh", "atp_triggered"],
+            "highlight_events": ["ma_shrink", "recommended_speed_drop", "atp_warning", "atp_triggered", "stop_completed"],
+        },
+    ),
+    ScenarioConfig(
+        scenario_id="section_block_stop",
+        name="Section block stop",
+        description="A blocked station or section prevents route authorization.",
+        page_config={
+            "hero_panel": "network_impact_summary",
+            "primary_chart": "line_overview",
+            "secondary_chart": "speed_distance",
+            "panels": ["blocked_section", "affected_vehicles", "signal_status", "stop_result"],
+            "key_metrics": ["blocked_section_id", "affected_vehicle_count", "target_vehicle_id", "remaining_distance_m"],
+            "highlight_events": ["section_blocked", "route_denied", "ma_updated", "stop_completed"],
+        },
+    ),
+    ScenarioConfig(
+        scenario_id="manual_overspeed_atp",
+        name="Manual overspeed ATP intervention",
+        description="Manual driving ignores recommended speed and ATP applies emergency braking.",
+        page_config={
+            "hero_panel": "target_vehicle_summary",
+            "primary_chart": "speed_distance",
+            "secondary_chart": "driver_input_timeline",
+            "panels": ["driver_input", "recommended_speed", "atp_status", "stop_result"],
+            "key_metrics": ["speed_kmh", "recommended_speed_kmh", "driver_brake_level", "atp_triggered", "emergency_brake"],
+            "highlight_events": ["recommended_speed_drop", "driver_no_response", "atp_triggered", "emergency_brake_applied", "stop_completed"],
+        },
+    ),
+    ScenarioConfig(
+        scenario_id="external_event_stop",
+        name="External event stop",
+        description="External disturbance updates signal or MA constraints and the train stops safely.",
+        page_config={
+            "hero_panel": "network_impact_summary",
+            "primary_chart": "line_overview",
+            "secondary_chart": "event_timeline",
+            "panels": ["external_system_status", "signal_status", "ma_status", "stop_result"],
+            "key_metrics": ["blocked_section_id", "affected_vehicle_count", "distance_to_ma_m", "atp_triggered"],
+            "highlight_events": ["external_event", "ma_updated", "brake_command_sent", "stop_completed"],
+        },
+    ),
+]
+
 
 class DashboardStateStore:
     """In-memory state cache for the current dashboard snapshot."""
@@ -155,6 +240,7 @@ class DashboardStateStore:
         self._command_acks: List[CommandAckSnapshot] = []
         self._power = PowerSnapshot(updated_at=now)
         self._alarms: List[AlarmEvent] = []
+        self._yard_layout = YardLayoutSnapshot(updated_at=now)
 
     def set_websocket_clients(self, count: int) -> None:
         with self._lock:
@@ -427,6 +513,15 @@ class DashboardStateStore:
                 payload.setdefault("condition", "normal")
                 self._apply_protocol_metadata(payload, raw_section, time.time(), "section", parent=data)
                 self._sections[section_id] = TrackSectionSnapshot(**payload)
+            if data.get("yard_layout") or data.get("stations"):
+                self.update_yard_layout(data)
+
+    def update_yard_layout(self, data: Dict[str, Any]) -> None:
+        payload = dict(data.get("yard_layout") or data)
+        payload.setdefault("line_id", data.get("line_id", "LINE-1"))
+        payload.setdefault("updated_at", time.time())
+        with self._lock:
+            self._yard_layout = YardLayoutSnapshot(**payload)
 
     def get_track_info_payload(self) -> Dict[str, Any]:
         with self._lock:
@@ -447,6 +542,16 @@ class DashboardStateStore:
                 "line_id": sections and next(iter(self._sections.values())).line_id or "LINE-1",
                 "sections": sections,
             }
+
+    def get_yard_layout(self) -> YardLayoutSnapshot:
+        with self._lock:
+            return self._yard_layout
+
+    def get_scenarios(self) -> List[ScenarioConfig]:
+        return list(SCENARIO_CONFIGS)
+
+    def get_scenario(self, scenario_id: str) -> Optional[ScenarioConfig]:
+        return next((item for item in SCENARIO_CONFIGS if item.scenario_id == scenario_id), None)
 
     def get_signal_input_payload(self) -> Dict[str, Any]:
         with self._lock:
@@ -568,10 +673,26 @@ class DashboardStateStore:
                 websocket_clients=self._websocket_clients,
                 degraded_reasons=degraded_reasons,
             )
+            integration = IntegrationStatus(
+                integration_mode="simulation" if data_source == "mock" else ("realtime" if data_source == "zmq" else "hybrid"),
+                realtime_channel="websocket",
+                driver_desk_connected=comm_status.driver_console_connected,
+                external_connections=ExternalConnections(
+                    power=not power.is_stale,
+                    signal_screen=bool(signals),
+                    cab_screen=bool(driver_inputs or ato_commands),
+                    viewer_3d=False,
+                    driver_desk=comm_status.driver_console_connected,
+                ),
+                degraded=system_status != "running",
+                last_realtime_message_at=comm_status.last_real_message_at or comm_status.last_message_at,
+            )
             return DashboardSnapshot(
                 timestamp=now,
                 system=system,
                 communication=comm_status,
+                integration=integration,
+                scenarios=list(SCENARIO_CONFIGS),
                 driver_inputs=sorted(driver_inputs, key=lambda item: item.vehicle_id),
                 ato_commands=sorted(ato_commands, key=lambda item: item.vehicle_id),
                 trains=sorted(trains, key=lambda item: item.vehicle_id),
