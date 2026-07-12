@@ -64,6 +64,15 @@ class Train:
         self.ato_jerk_limit_enabled = True
         self.ato_brake_bias_enabled = True
         self.ato_brake_bias = TrainAtoController.DEFAULT_BRAKE_BIAS
+        self.ato_brake_bias_adaptation_enabled = True
+        self.ato_brake_bias_learning_rate = 0.04
+        self.ato_brake_bias_deadband_m = 0.20
+        self.ato_brake_bias_max_step_per_stop = 0.05
+        self.ato_brake_bias_min_samples = 1
+        self.ato_brake_bias_history_size = 10
+        self.ato_brake_bias_history = []
+        self.ato_brake_bias_adapted_targets = set()
+        self.last_brake_bias_adjustment = None
         self.current_traction_level = 0
         self.current_brake_level = 0
         self.cached_traction_level = 0
@@ -291,6 +300,7 @@ class Train:
             None if self.stop_target is None else self.stop_target - self.state.position
         )
         self._maybe_generate_stop_result()
+        self._maybe_adapt_brake_bias_from_stop_result()
         self._sync_control_state_to_train_state()
 
     def enable_fallback_ato(self, target_position: float):
@@ -430,6 +440,115 @@ class Train:
             )
             self.stop_result_published_for_target = True
 
+    def _maybe_adapt_brake_bias_from_stop_result(self) -> None:
+        stop_result = self._stop_result_to_dict()
+        if not self._is_stop_result_eligible_for_brake_bias_adaptation(stop_result):
+            return
+
+        target_position_m = self._stop_result_value(
+            stop_result,
+            "target_position_m",
+            "target_position",
+        )
+        actual_position_m = self._stop_result_value(
+            stop_result,
+            "actual_position_m",
+            "actual_position",
+        )
+        error_m = self._stop_result_value(stop_result, "error_m")
+        target_key = round(target_position_m, 2)
+        old_bias = self.ato_brake_bias
+        delta = self._compute_brake_bias_delta_from_error(error_m)
+        new_bias = self.train_ato_controller.normalize_brake_bias(
+            old_bias + delta,
+            enabled=True,
+        )
+        applied_delta = round(new_bias - old_bias, 6)
+        if applied_delta == 0.0:
+            self.ato_brake_bias_adapted_targets.add(target_key)
+            return
+
+        self.ato_brake_bias = new_bias
+        record = {
+            "vehicle_id": self.state.vehicle_id,
+            "target_position_m": target_position_m,
+            "actual_position_m": actual_position_m,
+            "error_m": error_m,
+            "old_brake_bias": round(old_bias, 6),
+            "new_brake_bias": round(new_bias, 6),
+            "delta": applied_delta,
+            "qualified": stop_result.get("qualified"),
+            "status": stop_result.get("status"),
+        }
+        self.ato_brake_bias_history.append(record)
+        self.ato_brake_bias_history = self.ato_brake_bias_history[
+            -self.ato_brake_bias_history_size :
+        ]
+        self.last_brake_bias_adjustment = record
+        self.ato_brake_bias_adapted_targets.add(target_key)
+
+    def _is_stop_result_eligible_for_brake_bias_adaptation(self, stop_result: dict | None) -> bool:
+        if not self.ato_brake_bias_adaptation_enabled:
+            return False
+        if not self.ato_brake_bias_enabled:
+            return False
+        if self.driving_mode != "AM":
+            return False
+        if self.atp_intervened or self.state.emergency_brake:
+            return False
+        if self.last_ato_output is None or self.last_ato_output.degraded:
+            return False
+        if not stop_result:
+            return False
+        if stop_result.get("vehicle_id") != self.state.vehicle_id:
+            return False
+
+        target_position_m = self._stop_result_value(
+            stop_result,
+            "target_position_m",
+            "target_position",
+        )
+        actual_position_m = self._stop_result_value(
+            stop_result,
+            "actual_position_m",
+            "actual_position",
+        )
+        error_m = self._stop_result_value(stop_result, "error_m")
+        speed_ms = self._stop_result_value(stop_result, "speed_mps", "speed_ms")
+        if (
+            target_position_m is None
+            or actual_position_m is None
+            or error_m is None
+            or speed_ms is None
+        ):
+            return False
+        if abs(error_m) < self.ato_brake_bias_deadband_m:
+            return False
+        if speed_ms > 0.3:
+            return False
+
+        target_key = round(target_position_m, 2)
+        return target_key not in self.ato_brake_bias_adapted_targets
+
+    def _compute_brake_bias_delta_from_error(self, error_m: float) -> float:
+        raw_delta = float(error_m) * self.ato_brake_bias_learning_rate
+        return max(
+            -self.ato_brake_bias_max_step_per_stop,
+            min(self.ato_brake_bias_max_step_per_stop, raw_delta),
+        )
+
+    def _stop_result_value(self, stop_result: dict, *keys):
+        for key in keys:
+            if key in stop_result and stop_result[key] is not None:
+                try:
+                    value = float(stop_result[key])
+                except (TypeError, ValueError):
+                    return None
+                if self.train_ato_controller.is_finite_number(value):
+                    return value
+                return None
+        return None
+
     def _stop_result_to_dict(self):
         if self.last_stop_result is None:
             return None
@@ -467,6 +586,11 @@ class Train:
         self.state.stop_result = self._stop_result_to_dict()
         self.state.ato_brake_bias = self.ato_brake_bias
         self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
+        self.state.ato_brake_bias_adaptation_enabled = (
+            self.ato_brake_bias_adaptation_enabled
+        )
+        self.state.last_brake_bias_adjustment = self.last_brake_bias_adjustment
+        self.state.brake_bias_history_size = len(self.ato_brake_bias_history)
 
     def _update_track_position(self):
         edge_info = self.track.get_edge_info(self.state.position)

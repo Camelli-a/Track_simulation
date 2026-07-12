@@ -46,6 +46,9 @@ class TrainState:
     stop_result: Optional[dict] = None
     ato_brake_bias: float = 1.0
     ato_brake_bias_enabled: bool = False
+    ato_brake_bias_adaptation_enabled: bool = False
+    last_brake_bias_adjustment: Optional[dict] = None
+    brake_bias_history_size: int = 0
 
     @property
     def speed_kmh(self) -> float:
@@ -108,6 +111,11 @@ class TrainState:
             "stop_result": self.stop_result,
             "ato_brake_bias": round(self.ato_brake_bias, 3),
             "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
+            "ato_brake_bias_adaptation_enabled": (
+                self.ato_brake_bias_adaptation_enabled
+            ),
+            "last_brake_bias_adjustment": self.last_brake_bias_adjustment,
+            "brake_bias_history_size": self.brake_bias_history_size,
         }
 
 
