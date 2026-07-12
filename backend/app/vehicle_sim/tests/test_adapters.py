@@ -1,4 +1,9 @@
-from app.vehicle_sim.adapters.command_mapping import command_percent_to_levels
+import pytest
+
+from app.vehicle_sim.adapters.command_mapping import (
+    command_percent_to_levels,
+    normalize_driver_brake_level,
+)
 from app.vehicle_sim.adapters.id_mapping import index_to_vehicle_id, vehicle_id_to_index
 from app.vehicle_sim.adapters.units import m_to_cm, m_to_mm, ms_to_cms, ms_to_mms
 from app.vehicle_sim.adapters.vehicle_api_codec import (
@@ -25,6 +30,7 @@ from app.vehicle_sim.adapters.vehicle_udp_codec import (
     vehicle_input_to_driver_messages,
 )
 from app.vehicle_sim.message_router import MessageRouter
+from app.vehicle_sim.models import AtoCommand, DriverInput
 from app.vehicle_sim.train_manager import TrainManager
 
 
@@ -151,20 +157,202 @@ def test_command_percent_mapping():
     assert command_percent_to_levels(0, 100.0) == (0, 0)
 
 
+@pytest.mark.parametrize(
+    ("raw_level", "vehicle_level"),
+    [
+        (0, 0),
+        (1, 1),
+        (2, 1),
+        (3, 2),
+        (4, 2),
+        (5, 3),
+        (6, 3),
+        (7, 4),
+    ],
+)
+def test_driver_brake_level_maps_from_0_7_to_vehicle_0_4(
+    raw_level, vehicle_level
+):
+    assert normalize_driver_brake_level(raw_level) == vehicle_level
+
+
 def test_router_accepts_command_percent_input():
     manager = TrainManager()
     router = MessageRouter(manager)
     router.handle(
         {
             "type": "driver_input",
-            "train_index": 1,
+            "vehicle_id": "TRAIN-001",
             "command": 1,
             "percent": 50.0,
         }
     )
     train = manager.get_train("TRAIN-001")
-    assert train.current_traction_level == 2
-    assert train.current_brake_level == 0
+    assert train.requested_traction_level == 2
+    assert train.requested_brake_level == 0
+    assert train.current_traction_level == 0
+
+
+def test_router_accepts_real_driver_desk_fast_brake_without_emergency():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+    train = manager.get_train("TRAIN-001")
+    initial_position = train.state.position
+    initial_speed = train.state.speed_ms
+
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            "main_handle_raw": 4,
+            "traction_level": 4,
+            "brake_level": 7,
+            "control_mode": "manual",
+            "emergency_button": False,
+        }
+    )
+
+    assert train.cached_traction_level == 0
+    assert train.cached_brake_level == 4
+    assert train.current_traction_level == 0
+    assert train.current_brake_level == 4
+    assert train.fast_brake is True
+    assert train.state.emergency_brake is False
+    assert train.state.position == initial_position
+    assert train.state.speed_ms == initial_speed
+
+
+def test_router_driver_input_resolves_traction_brake_conflict():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            "traction_level": 3,
+            "brake_level": 2,
+        }
+    )
+
+    train = manager.get_train("TRAIN-001")
+    assert train.cached_traction_level == 0
+    assert train.cached_brake_level > 0
+
+
+def test_step_manual_caches_without_integrating_until_step_tick():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    initial_position = train.state.position
+    initial_speed = train.state.speed_ms
+    initial_acceleration = train.state.acceleration
+
+    train.step_manual(
+        DriverInput(
+            vehicle_id="TRAIN-001",
+            line_id="LINE-1",
+            source="test",
+            control_mode="manual",
+            traction_level=3,
+            brake_level=0,
+            direction="forward",
+            emergency_button=False,
+        ),
+        dt=1.0,
+    )
+
+    assert train.state.position == initial_position
+    assert train.state.speed_ms == initial_speed
+    assert train.state.acceleration == initial_acceleration
+    assert train.cached_traction_level == 3
+    assert train.cached_brake_level == 0
+
+    train.step_tick(1.0)
+
+    assert train.state.speed_ms > initial_speed
+    assert train.state.position > initial_position
+
+
+def test_step_ato_caches_without_integrating():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    initial_position = train.state.position
+    initial_speed = train.state.speed_ms
+
+    command = AtoCommand(
+        vehicle_id="TRAIN-001",
+        line_id="LINE-1",
+        control_mode="ato",
+        target_speed=30.0,
+        target_position=None,
+        traction_level=2,
+        brake_level=0,
+        reason="test",
+    )
+    train.step_ato(command, dt=1.0)
+
+    assert train.cached_external_ato_command is command
+    assert train.cached_traction_level == 2
+    assert train.cached_brake_level == 0
+    assert train.state.position == initial_position
+    assert train.state.speed_ms == initial_speed
+
+
+def test_driver_input_maps_driving_mode_and_direction():
+    manager = TrainManager()
+    router = MessageRouter(manager)
+    train = manager.get_train("TRAIN-001")
+
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            "control_mode": "ato",
+            "ato_active": True,
+            "direction": "backward",
+        }
+    )
+    assert train.driving_mode == "AM"
+    assert train.state.direction_code == -1
+
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            "control_mode": "manual",
+            "ato_active": False,
+            "direction": "neutral",
+        }
+    )
+    assert train.driving_mode == "SM"
+    assert train.state.direction_code == 0
+
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            "control_mode": "manual",
+            "direction": "forward",
+        }
+    )
+    assert train.state.direction_code == 1
+
+
+@pytest.mark.parametrize("field", ["emergency_button", "emergency_cmd"])
+def test_driver_emergency_fields_set_emergency(field):
+    manager = TrainManager()
+    router = MessageRouter(manager)
+
+    router.handle(
+        {
+            "type": "driver_input",
+            "train_index": 1,
+            field: True,
+        }
+    )
+
+    train = manager.get_train("TRAIN-001")
+    assert train.state.emergency_brake is True
+    assert train.emergency_pending is True
 
 
 def test_router_set_train_state_creates_missing_train():

@@ -28,6 +28,33 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def encode_bus_frame(topic: str, data: dict, timestamp: float | None = None) -> str:
+    """Encode the project's single-frame ``<topic> <json>`` wire format."""
+    if not topic or " " in topic:
+        raise ValueError("topic must be a non-empty token without spaces")
+    message = {
+        "topic": topic,
+        "timestamp": time.time() if timestamp is None else float(timestamp),
+        "data": data,
+    }
+    return f"{topic} {json.dumps(message, ensure_ascii=False)}"
+
+
+def decode_bus_frame(frame: str) -> tuple[str, dict]:
+    """Decode and validate one bus frame; the prefix is authoritative."""
+    prefix_topic, separator, payload_text = frame.partition(" ")
+    if not separator:
+        raise ValueError("message bus frame is missing topic prefix")
+    payload = json.loads(payload_text)
+    envelope_topic = payload.get("topic")
+    if envelope_topic != prefix_topic:
+        raise ValueError("message bus topic prefix does not match JSON envelope")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("message bus data must be an object")
+    return prefix_topic, payload
+
+
 class MessageBus:
     """
     ZMQ 消息总线客户端
@@ -116,21 +143,12 @@ class MessageBus:
             topic: 消息类型（如 "train_state"）
             data:  业务数据字典
         """
-        message = {
-            "topic": topic,
-            "timestamp": time.time(),
-            "data": data,
-        }
-        payload = json.dumps(message, ensure_ascii=False)
-
-        # ZMQ PUB/SUB 按消息第一帧的前缀过滤
-        # 格式："<topic> <json_payload>"
-        frame = f"{topic} {payload}"
+        frame = encode_bus_frame(topic, data)
 
         with self._pub_lock:
             self._pub_socket.send_string(frame)
 
-        logger.debug(f"Published [{topic}]: {payload[:120]}")
+        logger.debug(f"Published [{topic}]: {frame[:120]}")
 
     # ------------------------------------------------------------------
     # 订阅
@@ -186,12 +204,7 @@ class MessageBus:
 
                 frame = self._sub_socket.recv_string()
 
-                # 解析格式："<topic> <json>"
-                sep = frame.index(" ")
-                topic = frame[:sep]
-                payload = frame[sep + 1:]
-
-                message = json.loads(payload)
+                topic, message = decode_bus_frame(frame)
                 data = message.get("data", {})
 
                 handlers = self._handlers.get(topic, [])

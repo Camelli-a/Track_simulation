@@ -8,9 +8,13 @@ DEFAULT_TOPICS = [
     "driver_input",
     "ato_command",
     "ma_state",
+    "speed_constraint",
+    "signal_state",
+    "interlocking_state",
     "power_state",
     "comm_state",
     "track_info",
+    "fault_event",
     "add_train",
     "remove_train",
     "clear_trains",
@@ -21,9 +25,9 @@ DEFAULT_TOPICS = [
 def normalize_message(message: dict) -> dict:
     if "topic" in message and "data" in message:
         return {
+            **message.get("data", {}),
             "type": message["topic"],
             "timestamp": message.get("timestamp"),
-            **message.get("data", {}),
         }
     return message
 

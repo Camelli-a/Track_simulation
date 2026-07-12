@@ -2,9 +2,17 @@ import argparse
 import json
 import time
 
+from .adapters.id_mapping import vehicle_id_to_index
 from .message_router import MessageRouter
 from .train_manager import TrainManager
 from .zmq_bus import ZmqPublisher, ZmqSubscriber
+
+
+def infer_train_index(vehicle_id: str) -> int:
+    try:
+        return vehicle_id_to_index(vehicle_id)
+    except ValueError:
+        return 1
 
 
 def main():
@@ -14,15 +22,36 @@ def main():
     parser.add_argument("--zmq-pub-address", default=None)
     parser.add_argument("--zmq-sub-address", default=None)
     parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--vehicle-id", default="TRAIN-001")
+    parser.add_argument("--train-index", type=int, default=None)
+    parser.add_argument("--initial-position", type=float, default=0.0)
     args = parser.parse_args()
 
-    manager = TrainManager()
-    router = MessageRouter(manager, default_dt=args.dt)
+    vehicle_id = args.vehicle_id
+    train_index = args.train_index or infer_train_index(vehicle_id)
+
+    manager = TrainManager(initial_count=0)
+    result = manager.add_train(
+        vehicle_id=vehicle_id,
+        slot=train_index,
+        position=args.initial_position,
+    )
+    if not result.get("ok"):
+        raise SystemExit(f"failed to create single train process: {result}")
+
+    router = MessageRouter(
+        manager,
+        default_dt=args.dt,
+        owned_vehicle_id=vehicle_id,
+    )
 
     publisher = None if args.no_zmq else ZmqPublisher(args.zmq_pub_address)
     subscriber = None if args.no_zmq else ZmqSubscriber(args.zmq_sub_address)
 
-    print("vehicle_sim integrated mode started")
+    print("Single-train vehicle process started")
+    print(f"vehicle_id={vehicle_id}")
+    print(f"train_index={train_index}")
+    print(f"initial_position={args.initial_position}")
 
     try:
         step_index = 0
@@ -39,6 +68,16 @@ def main():
                 if publisher is not None:
                     publisher.publish(state)
                 print(json.dumps(state, ensure_ascii=False))
+
+            for train in manager.trains.values():
+                for state in (
+                    train.build_ato_state(),
+                    train.build_atp_state(),
+                    train.build_door_state(),
+                ):
+                    if publisher is not None:
+                        publisher.publish(state)
+                    print(json.dumps(state, ensure_ascii=False))
 
             for train in manager.trains.values():
                 if train.last_alarm is not None:

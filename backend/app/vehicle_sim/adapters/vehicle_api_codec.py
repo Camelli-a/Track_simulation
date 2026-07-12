@@ -44,7 +44,7 @@ def build_api_output_values(train_manager_or_states) -> list[float]:
             [
                 float(state.get("train_id", state.get("train_index", slot))),
                 float(state.get("active_cab", state.get("active_end", 1.0))),
-                float(state.get("direction", state.get("direction_code", 1.0))),
+                float(state.get("direction_code", 1.0)),
                 float(state.get("acceleration", 0.0)),
                 float(state.get("speed", 0.0)),
                 float(state.get("mileage", state.get("position", 0.0))),

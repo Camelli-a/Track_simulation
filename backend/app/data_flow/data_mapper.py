@@ -46,6 +46,9 @@ TRAIN_FIELD_MAPPING = {
     "brakeLevel": "brake_level",
     "doorMode": "door_mode",
     "doorClosedLight": "door_closed_light",
+    "highVoltageLight": "high_voltage_light",
+    "brakeBadLight": "brake_bad_light",
+    "networkFaultLight": "network_fault_light",
     "atoActive": "ato_active",
     "parkingApply": "parking_apply",
     "parkingRelease": "parking_release",
@@ -81,6 +84,57 @@ DRIVER_INPUT_FIELD_MAPPING = {
     "emergencyButton": "emergency_button",
     "tractionLevel": "traction_level",
     "brakeLevel": "brake_level",
+    "tractionPercent": "traction_percent",
+    "brakePercent": "brake_percent",
+    "actualTractionForceN": "actual_traction_force_n",
+    "actualBrakeForceN": "actual_brake_force_n",
+    "atpIntervention": "atp_intervention",
+    "drivingMode": "driving_mode",
+    "controlSource": "control_source",
+    "atoCapable": "ato_capable",
+    "autoReverseCap": "auto_reverse_cap",
+    "autoReverseActive": "auto_reverse_active",
+    "recommendedSpeedKmh": "recommended_speed_kmh",
+    "parkingBrake": "parking_brake",
+    "highVoltageOn": "high_voltage_on",
+    "doorOpenLight": "door_open_light",
+    "externalSpeedLimitKmh": "external_speed_limit_kmh",
+    "activeFaults": "active_faults",
+    "tractionPercent": "traction_percent",
+    "brakePercent": "brake_percent",
+    "mainHandleRaw": "main_handle_raw",
+    "mainHandleState": "main_handle_raw",
+    "keySwitch": "key_switch",
+    "atoStartBtn": "ato_start_btn",
+    "atoCapable": "ato_capable",
+    "atoActive": "ato_active",
+    "autoReverseCap": "auto_reverse_cap",
+    "autoReverseActive": "auto_reverse_active",
+    "autoRevFlag": "auto_rev_flag",
+    "modeUpConfirm": "mode_up_confirm",
+    "modeDnConfirm": "mode_dn_confirm",
+    "vigilance": "vigilance",
+    "vigilanceAllow": "vigilance_allow",
+    "forcedRelease": "forced_release",
+    "forcedPump": "forced_pump",
+    "horn": "horn",
+    "confirmFlag": "confirm_flag",
+    "tracAuxReset": "trac_aux_reset",
+    "washModeSwitch": "wash_mode_switch",
+    "frameSeq": "frame_seq",
+    "messageId": "message_id",
+    "parkingApply": "parking_apply",
+    "parkingRelease": "parking_release",
+    "brakeBadLight": "brake_bad_light",
+    "networkFaultLight": "network_fault_light",
+    "openLeftDoor": "open_left_door",
+    "openRightDoor": "open_right_door",
+    "closeLeftDoor": "close_left_door",
+    "closeRightDoor": "close_right_door",
+    "doorMode": "door_mode",
+    "doorClosedLight": "door_closed_light",
+    "highVoltageLight": "high_voltage_light",
+    "directionCode": "direction_code",
     "lineId": "line_id",
 }
 
@@ -278,7 +332,12 @@ def normalize_train(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_driver_input(data: Dict[str, Any]) -> Dict[str, Any]:
-    return normalize_fields(data, DRIVER_INPUT_FIELD_MAPPING)
+    normalized = normalize_fields(data, DRIVER_INPUT_FIELD_MAPPING)
+    if "traction_level" in normalized:
+        normalized["traction_level"] = max(0, min(int(normalized["traction_level"]), 4))
+    if "brake_level" in normalized:
+        normalized["brake_level"] = max(0, min(int(normalized["brake_level"]), 7))
+    return normalized
 
 
 def normalize_ato_command(data: Dict[str, Any]) -> Dict[str, Any]:

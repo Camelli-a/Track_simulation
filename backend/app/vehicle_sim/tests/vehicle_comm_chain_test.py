@@ -159,6 +159,7 @@ def vehicle_receiver(args: argparse.Namespace) -> int:
             emergency_button=bool(data.get("emergency_button", False)),
         )
         train.step_manual(driver_input, dt)
+        train.step_tick(dt)
         state = train.state.to_protocol()
         record = {
             "topic": topic,
