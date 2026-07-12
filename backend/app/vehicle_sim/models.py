@@ -49,6 +49,12 @@ class TrainState:
     def speed_kmh(self) -> float:
         return self.speed_ms * 3.6
 
+    @property
+    def protocol_direction(self) -> int:
+        if self.direction_code in (-1, 2, 0xAA):
+            return -1
+        return 1
+
     def to_protocol(self) -> dict:
         """Convert internal state to the train_state protocol message."""
         return {
@@ -58,8 +64,13 @@ class TrainState:
             "train_index": self.train_index,
             "line_id": self.line_id,
             "position": round(self.position, 3),
+            "position_m": round(self.position, 3),
             "speed": round(self.speed_kmh, 3),
+            "speed_ms": round(self.speed_ms, 3),
+            "speed_mps": round(self.speed_ms, 3),
+            "speed_kmh": round(self.speed_kmh, 3),
             "acceleration": round(self.acceleration, 3),
+            "acceleration_mps2": round(self.acceleration, 3),
             "mode": self.mode,
             "is_running": self.is_running,
             "emergency_brake": self.emergency_brake,
@@ -69,10 +80,15 @@ class TrainState:
                 None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
             ),
             "direction_code": self.direction_code,
+            "direction": self.protocol_direction,
             "driving_mode": self.driving_mode,
             "ato_state": self.ato_state,
             "recommended_speed": round(self.recommended_speed, 3),
+            "recommended_speed_kmh": round(self.recommended_speed, 3),
+            "recommended_speed_mps": round(self.recommended_speed / 3.6, 3),
             "ato_target_speed": round(self.ato_target_speed, 3),
+            "ato_target_speed_kmh": round(self.ato_target_speed, 3),
+            "ato_target_speed_mps": round(self.ato_target_speed / 3.6, 3),
             "ato_traction_level": self.ato_traction_level,
             "ato_brake_level": self.ato_brake_level,
             "commanded_traction_level": self.commanded_traction_level,

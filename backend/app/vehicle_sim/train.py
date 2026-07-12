@@ -434,12 +434,15 @@ class Train:
             "type": "stop_result",
             "vehicle_id": result.vehicle_id,
             "target_position": result.target_position_m,
+            "target_position_m": result.target_position_m,
             "actual_position": result.actual_position_m,
+            "actual_position_m": result.actual_position_m,
             "error_m": result.error_m,
             "error_cm": result.error_cm,
             "qualified": result.qualified,
             "status": result.status,
             "speed_ms": result.speed_ms,
+            "speed_mps": result.speed_ms,
         }
 
     def _sync_control_state_to_train_state(self):
