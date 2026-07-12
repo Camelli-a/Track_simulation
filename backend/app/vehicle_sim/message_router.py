@@ -1,6 +1,10 @@
 import time
 
-from .adapters.command_mapping import command_percent_to_levels
+from .adapters.command_mapping import (
+    command_percent_to_levels,
+    normalize_driver_brake_level,
+    normalize_driver_traction_level,
+)
 from .adapters.driver_plc_mapping import decode_driver_handle, direction_code_to_text
 from .adapters.id_mapping import index_to_vehicle_id
 from .models import AtoCommand, CommState, DriverInput, MaLimit, PowerState, TrackSection
@@ -48,20 +52,38 @@ class MessageRouter:
         if train is None:
             return
 
-        traction_level = int(msg.get("traction_level", 0))
-        brake_level = int(msg.get("brake_level", 0))
-        if msg.get("main_handle_state") is not None:
+        traction_level = normalize_driver_traction_level(msg.get("traction_level", 0))
+        brake_level = normalize_driver_traction_level(msg.get("brake_level", 0))
+        has_driver_handle = (
+            msg.get("main_handle_raw") is not None
+            or msg.get("main_handle_state") is not None
+        )
+        raw_brake_level = None
+        if has_driver_handle:
             traction_level, brake_level = decode_driver_handle(msg)
+            raw_brake_level = (
+                None if msg.get("brake_level") is None else int(msg.get("brake_level"))
+            )
         elif msg.get("command") is not None:
             traction_level, brake_level = command_percent_to_levels(
                 int(msg.get("command", 0)),
                 float(msg.get("percent", 0.0)),
             )
+        elif msg.get("brake_level") is not None and int(msg.get("brake_level", 0)) > 4:
+            brake_level = normalize_driver_brake_level(msg.get("brake_level"))
+
+        if brake_level > 0:
+            traction_level = 0
 
         direction_code = (
             None if msg.get("direction_code") is None else int(msg["direction_code"])
         )
         direction = msg.get("direction", direction_code_to_text(direction_code))
+        main_handle_raw = msg.get("main_handle_raw")
+        main_handle_state = msg.get("main_handle_state")
+        fast_brake = self._optional_int(main_handle_raw) == 4 or self._optional_int(
+            main_handle_state
+        ) == 4
 
         driver_input = DriverInput(
             vehicle_id=vehicle_id,
@@ -71,13 +93,22 @@ class MessageRouter:
             traction_level=traction_level,
             brake_level=brake_level,
             direction=direction,
-            emergency_button=bool(msg.get("emergency_button", False)),
+            emergency_button=self._optional_bool(msg.get("emergency_button"), False),
             command=msg.get("command"),
             percent=msg.get("percent"),
-            main_handle_state=msg.get("main_handle_state"),
+            main_handle_state=main_handle_state,
             traction_percent=msg.get("traction_percent"),
             brake_percent=msg.get("brake_percent"),
             direction_code=direction_code,
+            main_handle_raw=main_handle_raw,
+            ato_capable=self._optional_bool(msg.get("ato_capable")),
+            ato_active=self._optional_bool(msg.get("ato_active")),
+            ato_start_btn=self._optional_bool(msg.get("ato_start_btn")),
+            emergency_cmd=self._optional_bool(msg.get("emergency_cmd")),
+            key_switch=self._optional_bool(msg.get("key_switch")),
+            network_fault_light=self._optional_bool(msg.get("network_fault_light")),
+            raw_brake_level=raw_brake_level,
+            fast_brake=fast_brake,
         )
         train.step_manual(driver_input, self.default_dt)
 
@@ -250,6 +281,20 @@ class MessageRouter:
 
     def _optional_float(self, value):
         return None if value is None else float(value)
+
+    def _optional_int(self, value):
+        return None if value is None else int(value)
+
+    def _optional_bool(self, value, default=None):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
 
     def _handle_add_train(self, msg: dict):
         return self.train_manager.add_train(

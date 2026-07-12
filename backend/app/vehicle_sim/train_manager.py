@@ -148,6 +148,7 @@ class TrainManager:
                 percent=command.get("percent", 0.0),
             )
             train.step_manual(driver_input, dt)
+            train.step_tick(dt)
             outputs.append(train.state.to_protocol())
         return outputs
 

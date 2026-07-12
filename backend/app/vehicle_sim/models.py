@@ -29,6 +29,21 @@ class TrainState:
     section_id: Optional[str] = None
     edge_offset_m: Optional[float] = None
     direction_code: int = 1
+    driving_mode: str = "SM"
+    ato_state: Optional[str] = None
+    recommended_speed: float = 0.0
+    ato_target_speed: float = 0.0
+    ato_traction_level: int = 0
+    ato_brake_level: int = 0
+    commanded_traction_level: int = 0
+    commanded_brake_level: int = 0
+    applied_traction_level: int = 0
+    applied_brake_level: int = 0
+    control_source: str = "manual"
+    atp_intervened: bool = False
+    stop_target: Optional[float] = None
+    distance_to_stop: Optional[float] = None
+    stop_result: Optional[dict] = None
 
     @property
     def speed_kmh(self) -> float:
@@ -54,6 +69,25 @@ class TrainState:
                 None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
             ),
             "direction_code": self.direction_code,
+            "driving_mode": self.driving_mode,
+            "ato_state": self.ato_state,
+            "recommended_speed": round(self.recommended_speed, 3),
+            "ato_target_speed": round(self.ato_target_speed, 3),
+            "ato_traction_level": self.ato_traction_level,
+            "ato_brake_level": self.ato_brake_level,
+            "commanded_traction_level": self.commanded_traction_level,
+            "commanded_brake_level": self.commanded_brake_level,
+            "applied_traction_level": self.applied_traction_level,
+            "applied_brake_level": self.applied_brake_level,
+            "control_source": self.control_source,
+            "atp_intervened": self.atp_intervened,
+            "stop_target": (
+                None if self.stop_target is None else round(self.stop_target, 3)
+            ),
+            "distance_to_stop": (
+                None if self.distance_to_stop is None else round(self.distance_to_stop, 3)
+            ),
+            "stop_result": self.stop_result,
         }
 
 
@@ -73,6 +107,15 @@ class DriverInput:
     traction_percent: Optional[float] = None
     brake_percent: Optional[float] = None
     direction_code: Optional[int] = None
+    main_handle_raw: Optional[int] = None
+    ato_capable: Optional[bool] = None
+    ato_active: Optional[bool] = None
+    ato_start_btn: Optional[bool] = None
+    emergency_cmd: Optional[bool] = None
+    key_switch: Optional[bool] = None
+    network_fault_light: Optional[bool] = None
+    raw_brake_level: Optional[int] = None
+    fast_brake: bool = False
 
 
 @dataclass
