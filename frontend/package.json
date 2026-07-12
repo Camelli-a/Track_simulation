@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "convert-line-data": "python ../scripts/convert_line_data.py"
   },
   "dependencies": {
     "axios": "^1.7.2",
