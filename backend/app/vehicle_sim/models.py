@@ -69,10 +69,18 @@ class TrainState:
     parking_brake: bool = False
     external_speed_limit_kmh: Optional[float] = None
     active_faults: tuple[str, ...] = ()
+    ato_brake_bias: float = 1.0
+    ato_brake_bias_enabled: bool = False
 
     @property
     def speed_kmh(self) -> float:
         return self.speed_ms * 3.6
+
+    @property
+    def protocol_direction(self) -> int:
+        if self.direction_code in (-1, 2, 0xAA):
+            return -1
+        return 1
 
     def to_protocol(self) -> dict:
         """Convert internal state to the train_state protocol message."""
@@ -85,6 +93,7 @@ class TrainState:
             "train_length": TRAIN_LENGTH_M,
             "position": round(self.position, 3),
             "speed": round(self.speed_kmh, 3),
+            "speed_ms": round(self.speed_ms, 3),
             "acceleration": round(self.acceleration, 3),
             "position_m": round(self.position, 3),
             "speed_mps": round(self.speed_ms, 3),
@@ -101,13 +110,15 @@ class TrainState:
                 None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
             ),
             "direction_code": self.direction_code,
-            "direction": (
+            "direction": self.protocol_direction,
+            "direction_text": (
                 "reverse"
                 if self.direction_code < 0
                 else "neutral"
                 if self.direction_code == 0
                 else "forward"
             ),
+            "direction_sign": self.protocol_direction,
             "traction_level": self.traction_level,
             "brake_level": self.brake_level,
             "traction_percent": round(self.traction_percent, 3),
@@ -127,9 +138,15 @@ class TrainState:
                 if self.recommended_speed_kmh is None
                 else round(self.recommended_speed_kmh, 3)
             ),
+            "recommended_speed_mps": round(
+                (0.0 if self.recommended_speed_kmh is None else self.recommended_speed_kmh)
+                / 3.6,
+                3,
+            ),
             "ato_state": self.ato_state,
             "ato_target_speed_kmh": round(self.ato_target_speed_kmh, 3),
             "ato_target_speed": round(self.ato_target_speed_kmh, 3),
+            "ato_target_speed_mps": round(self.ato_target_speed_kmh / 3.6, 3),
             "ato_traction_level": self.ato_traction_level,
             "ato_brake_level": self.ato_brake_level,
             "commanded_traction_level": self.commanded_traction_level,
@@ -157,6 +174,8 @@ class TrainState:
             "parking_brake": self.parking_brake,
             "external_speed_limit_kmh": self.external_speed_limit_kmh,
             "active_faults": list(self.active_faults),
+            "ato_brake_bias": round(self.ato_brake_bias, 3),
+            "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
         }
 
 

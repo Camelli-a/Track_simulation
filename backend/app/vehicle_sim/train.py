@@ -74,6 +74,8 @@ class Train:
         self.ato_delay_compensation_enabled = True
         self.ato_gradient_compensation_enabled = True
         self.ato_jerk_limit_enabled = True
+        self.ato_brake_bias_enabled = True
+        self.ato_brake_bias = TrainAtoController.DEFAULT_BRAKE_BIAS
         self.current_traction_level = 0
         self.current_brake_level = 0
         self.cached_traction_level = 0
@@ -538,8 +540,9 @@ class Train:
 
         self.current_traction_level = traction_level
         self.current_brake_level = brake_level
-        self.cached_traction_level = traction_level
-        self.cached_brake_level = brake_level
+        if self.driving_mode != "AM":
+            self.cached_traction_level = traction_level
+            self.cached_brake_level = brake_level
         self.current_traction_percent = traction_percent
         self.current_brake_percent = brake_percent
         self.control_source = selected_source
@@ -584,6 +587,8 @@ class Train:
             previous_commanded_traction_level=self.commanded_traction_level,
             previous_commanded_brake_level=min(self.commanded_brake_level, 4),
             jerk_limit_enabled=self.ato_jerk_limit_enabled,
+            brake_bias=self.ato_brake_bias,
+            brake_bias_enabled=self.ato_brake_bias_enabled,
         )
         ato_output = self.train_ato_controller.compute_control(ato_input)
         self.last_ato_output = ato_output
@@ -699,6 +704,8 @@ class Train:
         self.state.stop_target = self.stop_target_m
         self.state.distance_to_stop = self.distance_to_stop_m
         self.state.stop_result = self._stop_result_to_dict()
+        self.state.ato_brake_bias = self.ato_brake_bias
+        self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
         self.state.ato_active = (
             self.driving_mode == "AM" and self.state.mode == "ato"
         )
@@ -744,6 +751,8 @@ class Train:
             "ato_target_speed_kmh": self.ato_target_speed_kmh,
             "ato_traction_level": self.ato_traction_level,
             "ato_brake_level": self.ato_brake_level,
+            "ato_brake_bias": self.ato_brake_bias,
+            "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
             "stop_target_m": self.stop_target_m,
             "distance_to_stop_m": self.distance_to_stop_m,
             "auto_reverse_cap": self.auto_reverse_capable,
@@ -904,13 +913,16 @@ class Train:
         return {
             "type": "stop_result",
             "vehicle_id": result.vehicle_id,
+            "target_position": result.target_position_m,
             "target_position_m": result.target_position_m,
+            "actual_position": result.actual_position_m,
             "actual_position_m": result.actual_position_m,
             "error_m": result.error_m,
             "error_cm": result.error_cm,
             "qualified": result.qualified,
             "status": result.status,
             "speed_ms": result.speed_ms,
+            "speed_mps": result.speed_ms,
         }
 
     def _effective_external_allowed_speed(self) -> float | None:
