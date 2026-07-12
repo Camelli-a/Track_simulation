@@ -130,6 +130,7 @@ class MockDashboardService:
                 "sections": self._build_track_info(),
             }
         )
+        self.store.update_yard_layout(self._build_yard_layout())
         self.store.update_signal_state(
             {
                 "system_mode": "normal",
@@ -179,6 +180,8 @@ class MockDashboardService:
                     "section_id": f"SEG-{index + 1:02d}",
                     "start": start,
                     "end": end,
+                    "station_id": self._station_id_for_section(index),
+                    "track_id": self._track_id_for_section(index),
                     "occupied": bool(occupying),
                     "vehicle_id": occupying[0] if occupying else None,
                     "occupied_by": occupying[0] if occupying else None,
@@ -208,6 +211,12 @@ class MockDashboardService:
                     "signal_id": f"SIG-{index + 1:02d}",
                     "position": index * self.section_length,
                     "state": state,
+                    "station_id": self._station_id_for_section(index),
+                    "track_id": self._track_id_for_section(index),
+                    "section_id": f"SEG-{index + 1:02d}",
+                    "direction": "up",
+                    "protects_switch_id": "SW-01" if index == 3 else ("SW-02" if index == 6 else None),
+                    "protects_section_id": f"SEG-{min(index + 2, 10):02d}",
                     "signal_type": "出站" if index in {2, 7} else "区间",
                     "route_id": "R_MAIN",
                     "signal_state": state,
@@ -232,6 +241,7 @@ class MockDashboardService:
                     "gradient": 8.0 if index in {1, 5} else 0.0,
                     "speed_limit": 45.0 if has_station else 60.0,
                     "station_id": "STA-01" if index == 2 else ("STA-02" if index == 7 else None),
+                    "track_id": self._track_id_for_section(index),
                     "stop_position": end - 50.0 if has_station else None,
                 }
             )
@@ -242,6 +252,11 @@ class MockDashboardService:
         return [
             {
                 "switch_id": "SW-01",
+                "station_id": "STA-01",
+                "switch_type": "single",
+                "connects": ["STA-01-T1", "STA-01-T2", "STA-01-T3"],
+                "normal_to": "STA-01-T1",
+                "reverse_to": "STA-01-T2",
                 "position": "reverse" if reverse else "normal",
                 "turnout_id": "SW-01",
                 "routing": "reverse" if reverse else "normal",
@@ -253,6 +268,11 @@ class MockDashboardService:
             },
             {
                 "switch_id": "SW-02",
+                "station_id": "STA-02",
+                "switch_type": "single",
+                "connects": ["STA-02-T1", "STA-02-T2", "STA-02-T3"],
+                "normal_to": "STA-02-T1",
+                "reverse_to": "STA-02-T2",
                 "position": "normal" if reverse else "reverse",
                 "turnout_id": "SW-02",
                 "routing": "normal" if reverse else "reverse",
@@ -278,6 +298,126 @@ class MockDashboardService:
                 "locked_by_route_id": "R_MAIN" if not reverse else None,
             }
         ]
+
+    def _station_id_for_section(self, index: int) -> str | None:
+        if index in {1, 2, 3}:
+            return "STA-01"
+        if index in {6, 7, 8}:
+            return "STA-02"
+        return None
+
+    def _track_id_for_section(self, index: int) -> str:
+        station_id = self._station_id_for_section(index)
+        if station_id is None:
+            return "LINE-1-UP"
+        if index in {2, 7}:
+            return f"{station_id}-T1"
+        if index in {3, 8}:
+            return f"{station_id}-T2"
+        return f"{station_id}-T3"
+
+    def _build_yard_layout(self) -> dict:
+        stations = []
+        yard_tracks = []
+        yard_switches = []
+        yard_signals = []
+        yard_sections = []
+        for station_index, station in enumerate(self.stations):
+            station_id = station["station_id"]
+            station_name = "Central Station" if station_id == "STA-01" else "East Loop Station"
+            y_base = 120 + station_index * 180
+            section_ids = [
+                f"SEG-{index + 1:02d}"
+                for index in range(int(self.line_length / self.section_length))
+                if self._station_id_for_section(index) == station_id
+            ]
+            tracks = [
+                {
+                    "track_id": f"{station_id}-T1",
+                    "track_name": "Track 1",
+                    "station_id": station_id,
+                    "track_type": "main",
+                    "direction": "up",
+                    "section_ids": [item for item in section_ids if item.endswith("03") or item.endswith("08")],
+                    "geometry": {"type": "polyline", "points": [[0, y_base], [280, y_base]]},
+                },
+                {
+                    "track_id": f"{station_id}-T2",
+                    "track_name": "Track 2",
+                    "station_id": station_id,
+                    "track_type": "arrival_departure",
+                    "direction": "down",
+                    "section_ids": [item for item in section_ids if item.endswith("04") or item.endswith("09")],
+                    "geometry": {"type": "polyline", "points": [[40, y_base + 40], [240, y_base + 40]]},
+                },
+                {
+                    "track_id": f"{station_id}-T3",
+                    "track_name": "Lead track",
+                    "station_id": station_id,
+                    "track_type": "siding",
+                    "direction": "bidirectional",
+                    "section_ids": [item for item in section_ids if item.endswith("02") or item.endswith("07")],
+                    "geometry": {"type": "polyline", "points": [[80, y_base - 40], [200, y_base - 40]]},
+                },
+            ]
+            switch = {
+                "switch_id": f"SW-{station_index + 1:02d}",
+                "station_id": station_id,
+                "switch_type": "single",
+                "connects": [track["track_id"] for track in tracks],
+                "normal_to": f"{station_id}-T1",
+                "reverse_to": f"{station_id}-T2",
+                "geometry": {"type": "point", "x": 140, "y": y_base},
+            }
+            signals = [
+                {
+                    "signal_id": f"SIG-{3 if station_id == 'STA-01' else 8:02d}",
+                    "station_id": station_id,
+                    "track_id": f"{station_id}-T1",
+                    "direction": "up",
+                    "protects_switch_id": switch["switch_id"],
+                    "protects_section_id": section_ids[-1] if section_ids else None,
+                    "geometry": {"type": "point", "x": 30, "y": y_base - 24},
+                }
+            ]
+            sections = [
+                {
+                    "section_id": section_id,
+                    "station_id": station_id,
+                    "track_id": self._track_id_for_section(int(section_id.split("-")[-1]) - 1),
+                    "geometry": {"type": "polyline", "points": [[0, y_base], [280, y_base]]},
+                }
+                for section_id in section_ids
+            ]
+            station_payload = {
+                "station_id": station_id,
+                "station_name": station_name,
+                "track_ids": [track["track_id"] for track in tracks],
+                "switch_ids": [switch["switch_id"]],
+                "signal_ids": [signal["signal_id"] for signal in signals],
+                "section_ids": section_ids,
+                "tracks": tracks,
+                "switches": [switch],
+                "signals": signals,
+                "sections": sections,
+            }
+            stations.append(station_payload)
+            yard_tracks.extend(tracks)
+            yard_switches.append(switch)
+            yard_signals.extend(signals)
+            yard_sections.extend(sections)
+        return {
+            "line_id": "LINE-1",
+            "stations": stations,
+            "yard_tracks": yard_tracks,
+            "yard_switches": yard_switches,
+            "yard_signals": yard_signals,
+            "yard_sections": yard_sections,
+            "updated_at": time.time(),
+        }
+
+    def build_yard_layout_seed(self) -> dict:
+        return self._build_yard_layout()
 
     def _nearest_station(self, position: float) -> dict:
         return min(self.stations, key=lambda station: abs(station["position"] - position))

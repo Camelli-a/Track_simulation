@@ -12,6 +12,7 @@ from .atp import (
     AtpConfig,
     evaluate_atp,
 )
+from .controllers.train_ato_controller import AtoControlInput, TrainAtoController
 from .dynamics import update_dynamics
 from .door_state import DoorState, normalize_door_mode, sides_for_mode
 from .ma_validation import MaValidationResult, effective_allowed_speed, validate_ma
@@ -67,8 +68,19 @@ class Train:
         self.last_atp_decision = None
         self.last_atp_alarm_reason = None
         self.atp_triggered = False
+        self.train_ato_controller = TrainAtoController()
+        self.last_ato_output = None
+        self.ato_control_delay_sec = TrainAtoController.DEFAULT_CONTROL_DELAY_SEC
+        self.ato_delay_compensation_enabled = True
+        self.ato_gradient_compensation_enabled = True
+        self.ato_jerk_limit_enabled = True
         self.current_traction_level = 0
         self.current_brake_level = 0
+        self.cached_traction_level = 0
+        self.cached_brake_level = 0
+        self.cached_external_ato_command = None
+        self.raw_brake_level = None
+        self.fast_brake = False
         self.requested_traction_level = 0
         self.requested_brake_level = 0
         self.requested_traction_percent = 0.0
@@ -76,9 +88,23 @@ class Train:
         self.current_traction_percent = 0.0
         self.current_brake_percent = 0.0
         self.driving_mode = "SM"
-        self.control_source = "none"
+        self.control_source = "manual"
         self.emergency_source = None
         self.atp_intervened = False
+        self.emergency_pending = False
+        self.commanded_traction_level = 0
+        self.commanded_brake_level = 0
+        self.applied_traction_level = 0
+        self.applied_brake_level = 0
+        self.ato_traction_level = 0
+        self.ato_brake_level = 0
+        self.ato_state = "manual_recommend"
+        self.ato_target_speed_kmh = 0.0
+        self.stop_target_m = None
+        self.distance_to_stop_m = None
+        self.last_stop_result = None
+        self.last_stop_result_target_m = None
+        self.stop_result_published_for_target = False
         self.manual_emergency_requested = False
         self.key_switch_active = True
         self.ato_start_requested = False
@@ -119,7 +145,9 @@ class Train:
         self.door_stop_tolerance_m = 0.5
         self.door_rearm_distance_m = 2.0
         self.fallback_ato = None
+        self.next_stop_target_m = None
         self.recommended_speed_kmh = None
+        self.recommended_speed = 0.0
         self._sync_door_state()
         self._sync_indicator_outputs()
         self._sync_public_state()
@@ -252,13 +280,20 @@ class Train:
 
         traction_level = max(0, min(int(driver_input.traction_level), 4))
         brake_level = max(0, min(int(driver_input.brake_level), 7))
+        self.raw_brake_level = driver_input.raw_brake_level
+        self.fast_brake = bool(driver_input.fast_brake or driver_input.main_handle_raw == 4)
+        if self.fast_brake:
+            traction_level = 0
+            brake_level = 4
         traction_percent = (
             traction_level_to_percent(traction_level)
             if driver_input.traction_percent is None
             else max(0.0, min(float(driver_input.traction_percent), 100.0))
         )
         brake_percent = (
-            service_brake_level_to_percent(brake_level)
+            traction_level_to_percent(brake_level)
+            if self.fast_brake
+            else service_brake_level_to_percent(brake_level)
             if driver_input.brake_percent is None
             else max(0.0, min(float(driver_input.brake_percent), 100.0))
         )
@@ -267,9 +302,19 @@ class Train:
             traction_percent = 0.0
         self.requested_traction_level = traction_level
         self.requested_brake_level = brake_level
+        self.cached_traction_level = traction_level
+        self.cached_brake_level = brake_level
         self.requested_traction_percent = traction_percent
         self.requested_brake_percent = brake_percent
-        self.driving_mode = "SM"
+        if self.fast_brake:
+            self.current_traction_level = traction_level
+            self.current_brake_level = brake_level
+            self.current_traction_percent = traction_percent
+            self.current_brake_percent = brake_percent
+        if (driver_input.control_mode or "").lower() == "ato":
+            self.driving_mode = "AM"
+        else:
+            self.driving_mode = "SM"
         self.control_source = "manual"
         if driver_input.direction_code is not None:
             self.state.direction_code = -1 if driver_input.direction_code == 2 else 1
@@ -280,7 +325,11 @@ class Train:
         else:
             self.state.direction_code = 0
 
-        self.manual_emergency_requested = bool(driver_input.emergency_button)
+        self.manual_emergency_requested = bool(
+            driver_input.emergency_button or driver_input.emergency_cmd
+        )
+        if self.manual_emergency_requested:
+            self.emergency_pending = True
         if driver_input.key_switch is not None:
             self.key_switch_active = bool(driver_input.key_switch)
         self.ato_start_requested = self._rising_edge(
@@ -373,6 +422,9 @@ class Train:
             traction_level = 0
         self.requested_traction_level = traction_level
         self.requested_brake_level = brake_level
+        self.cached_external_ato_command = ato_command
+        self.cached_traction_level = traction_level
+        self.cached_brake_level = brake_level
         self.requested_traction_percent = traction_level_to_percent(traction_level)
         self.requested_brake_percent = traction_level_to_percent(brake_level)
         self.driving_mode = "AM"
@@ -381,12 +433,23 @@ class Train:
     def step_tick(self, dt: float):
         self._update_doors(dt)
         self._sync_indicator_outputs()
+        self._update_ato_recommendation(dt)
         traction_level = self.requested_traction_level
         brake_level = self.requested_brake_level
         traction_percent = self.requested_traction_percent
         brake_percent = self.requested_brake_percent
         selected_source = "ato" if self.driving_mode == "AM" else "manual"
         self.atp_intervened = False
+
+        if self.driving_mode != "AM":
+            if (
+                self.cached_traction_level != self.requested_traction_level
+                or self.cached_brake_level != self.requested_brake_level
+            ):
+                traction_level = self.cached_traction_level
+                brake_level = self.cached_brake_level
+                traction_percent = traction_level_to_percent(traction_level)
+                brake_percent = service_brake_level_to_percent(brake_level)
 
         if self.fallback_ato is not None and not self.state.emergency_brake:
             traction_level, brake_level, _ = self.fallback_ato.compute(
@@ -397,6 +460,24 @@ class Train:
             selected_source = "fallback"
             traction_percent = traction_level_to_percent(traction_level)
             brake_percent = traction_level_to_percent(brake_level)
+
+        if (
+            self.driving_mode == "AM"
+            and self.last_ato_output is not None
+            and self.fallback_ato is None
+            and self.cached_external_ato_command is None
+        ):
+            traction_level = self.last_ato_output.commanded_traction_level
+            brake_level = self.last_ato_output.commanded_brake_level
+            traction_percent = traction_level_to_percent(traction_level)
+            brake_percent = traction_level_to_percent(brake_level)
+            selected_source = self.last_ato_output.control_source or "ato"
+            if self.last_ato_output.degraded:
+                traction_level = 0
+                traction_percent = 0.0
+                brake_level = max(brake_level, 2)
+                brake_percent = max(brake_percent, traction_level_to_percent(brake_level))
+                selected_source = "degraded"
 
         if self.driving_mode == "AM" and not self.has_valid_ma():
             traction_level = 0
@@ -445,19 +526,75 @@ class Train:
             brake_level = 4
             traction_percent = 0.0
             brake_percent = 100.0
-            selected_source = self.emergency_source or "atp"
-            self.atp_intervened = selected_source == "atp"
+            selected_source = (
+                "emergency"
+                if self.emergency_source in {None, "atp"}
+                else self.emergency_source
+            )
+            self.atp_intervened = self.emergency_source == "atp"
+            self.state.mode = "emergency"
         elif not self.state.emergency_brake:
             self.state.mode = "ato" if self.driving_mode == "AM" else "manual"
 
         self.current_traction_level = traction_level
         self.current_brake_level = brake_level
+        self.cached_traction_level = traction_level
+        self.cached_brake_level = brake_level
         self.current_traction_percent = traction_percent
         self.current_brake_percent = brake_percent
         self.control_source = selected_source
+        self.commanded_traction_level = traction_level
+        self.commanded_brake_level = brake_level
 
         self._step(traction_level, brake_level, dt)
+        self.distance_to_stop_m = (
+            None
+            if self.stop_target_m is None
+            else self.stop_target_m - self.state.position
+        )
+        self._maybe_generate_stop_result()
+        self._sync_public_state()
         self._clear_transient_events()
+
+    def _update_ato_recommendation(self, dt: float) -> None:
+        stop_target_m = self._resolve_stop_target_m()
+        ma_result = self.validate_ma()
+        ato_input = AtoControlInput(
+            vehicle_id=self.state.vehicle_id,
+            position_m=self.state.position,
+            speed_ms=self.state.speed_ms,
+            ma_limit_m=self.ma_limit,
+            allowed_speed_kmh=self._effective_external_allowed_speed(),
+            stop_target_m=stop_target_m,
+            target_distance_m=self.target_distance_m,
+            permission=self.permission,
+            signal_state=self.signal_state,
+            driving_mode=self.driving_mode,
+            direction=self.state.direction_code,
+            ma_valid=ma_result.valid,
+            ma_age_sec=ma_result.age_sec,
+            max_ma_age_sec=self.ma_timeout_sec,
+            comm_ok=self.comm_ok,
+            dt=dt,
+            acceleration_ms2=self.state.acceleration,
+            control_delay_sec=self.ato_control_delay_sec,
+            delay_compensation_enabled=self.ato_delay_compensation_enabled,
+            gradient_permille=self.track.get_gradient(self.state.position),
+            gradient_compensation_enabled=self.ato_gradient_compensation_enabled,
+            previous_commanded_traction_level=self.commanded_traction_level,
+            previous_commanded_brake_level=min(self.commanded_brake_level, 4),
+            jerk_limit_enabled=self.ato_jerk_limit_enabled,
+        )
+        ato_output = self.train_ato_controller.compute_control(ato_input)
+        self.last_ato_output = ato_output
+        self.ato_traction_level = ato_output.ato_traction_level
+        self.ato_brake_level = ato_output.ato_brake_level
+        self.ato_state = ato_output.ato_state
+        self.recommended_speed_kmh = ato_output.recommended_speed_kmh
+        self.recommended_speed = ato_output.recommended_speed_kmh
+        self.ato_target_speed_kmh = ato_output.ato_target_speed_kmh
+        self.stop_target_m = stop_target_m
+        self.distance_to_stop_m = ato_output.distance_to_stop_m
 
     def _rising_edge(self, name: str, current: bool) -> bool:
         current_value = bool(current)
@@ -550,6 +687,18 @@ class Train:
         self.state.atp_intervention = self.atp_intervened
         self.state.driving_mode = self.driving_mode
         self.state.control_source = self.control_source
+        self.state.ato_state = self.ato_state
+        self.state.ato_target_speed_kmh = self.ato_target_speed_kmh
+        self.state.ato_traction_level = self.ato_traction_level
+        self.state.ato_brake_level = self.ato_brake_level
+        self.state.commanded_traction_level = self.commanded_traction_level
+        self.state.commanded_brake_level = self.commanded_brake_level
+        self.state.applied_traction_level = self.applied_traction_level
+        self.state.applied_brake_level = self.applied_brake_level
+        self.state.atp_intervened = self.atp_intervened
+        self.state.stop_target = self.stop_target_m
+        self.state.distance_to_stop = self.distance_to_stop_m
+        self.state.stop_result = self._stop_result_to_dict()
         self.state.ato_active = (
             self.driving_mode == "AM" and self.state.mode == "ato"
         )
@@ -557,6 +706,7 @@ class Train:
         self.state.auto_reverse_cap = self.auto_reverse_capable
         self.state.auto_reverse_active = self.auto_reverse_active
         self.state.recommended_speed_kmh = self.recommended_speed_kmh
+        self.state.recommended_speed = 0.0 if self.recommended_speed_kmh is None else self.recommended_speed_kmh
         self.state.parking_brake = self.parking_brake_applied
         self.state.external_speed_limit_kmh = self.external_speed_limit_kmh
         self.state.active_faults = tuple(sorted(self.active_faults))
@@ -589,7 +739,13 @@ class Train:
             "driving_mode": self.driving_mode,
             "ato_active": self.state.ato_active,
             "ato_capable": self.ato_capable,
+            "ato_state": self.ato_state,
             "recommended_speed_kmh": self.recommended_speed_kmh,
+            "ato_target_speed_kmh": self.ato_target_speed_kmh,
+            "ato_traction_level": self.ato_traction_level,
+            "ato_brake_level": self.ato_brake_level,
+            "stop_target_m": self.stop_target_m,
+            "distance_to_stop_m": self.distance_to_stop_m,
             "auto_reverse_cap": self.auto_reverse_capable,
             "auto_reverse_active": self.auto_reverse_active,
         }
@@ -679,9 +835,14 @@ class Train:
             self.current_brake_level = brake_level
             self.current_traction_percent = 0.0
             self.current_brake_percent = 100.0
-            self.control_source = "atp"
+            self.applied_traction_level = traction_level
+            self.applied_brake_level = brake_level
+            self.control_source = "emergency"
             self.emergency_source = "atp"
             self.atp_intervened = True
+        else:
+            self.applied_traction_level = traction_level
+            self.applied_brake_level = brake_level
 
         gradient = self.track.get_gradient(self.state.position)
 
@@ -707,6 +868,50 @@ class Train:
         self.state.actual_brake_force_n = brake_force
         self._sync_public_state()
         self._update_track_position()
+
+    def _resolve_stop_target_m(self) -> float | None:
+        if self.next_stop_target_m is not None:
+            return self.next_stop_target_m
+        if hasattr(self.track, "get_stop_position"):
+            return self.track.get_stop_position(self.state.position)
+        return None
+
+    def _maybe_generate_stop_result(self) -> None:
+        if self.stop_target_m != self.last_stop_result_target_m:
+            self.last_stop_result_target_m = self.stop_target_m
+            self.stop_result_published_for_target = False
+            self.last_stop_result = None
+
+        if self.stop_target_m is None or self.stop_result_published_for_target:
+            return
+
+        if (
+            self.state.speed_ms <= self.train_ato_controller.HOLD_SPEED_MS
+            and abs(self.state.position - self.stop_target_m) <= 2.0
+        ):
+            self.last_stop_result = self.train_ato_controller.evaluate_stop_result(
+                vehicle_id=self.state.vehicle_id,
+                target_position_m=self.stop_target_m,
+                actual_position_m=self.state.position,
+                speed_ms=self.state.speed_ms,
+            )
+            self.stop_result_published_for_target = True
+
+    def _stop_result_to_dict(self) -> dict | None:
+        if self.last_stop_result is None:
+            return None
+        result = self.last_stop_result
+        return {
+            "type": "stop_result",
+            "vehicle_id": result.vehicle_id,
+            "target_position_m": result.target_position_m,
+            "actual_position_m": result.actual_position_m,
+            "error_m": result.error_m,
+            "error_cm": result.error_cm,
+            "qualified": result.qualified,
+            "status": result.status,
+            "speed_ms": result.speed_ms,
+        }
 
     def _effective_external_allowed_speed(self) -> float | None:
         candidates = [

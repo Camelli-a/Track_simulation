@@ -18,6 +18,7 @@ from app.services.signal_track_config import (
     SWITCHES,
     WARNING_MARGIN,
 )
+from app.services.signal_speed_limit import find_static_speed_limit, resolve_speed_limit
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class DemoVehicle:
     speed: float
     route_id: str
     train_length: float = DEFAULT_TRAIN_LENGTH
+    fault_speed_limit: Optional[float] = None
+    emergency_brake: bool = False
 
 
 def calculate_signal_snapshot(
@@ -99,6 +102,12 @@ def _normalize_train_states(train_states: list[dict]) -> List[DemoVehicle]:
             speed=float(item["speed"]),
             route_id=str(item["route_id"]),
             train_length=float(item.get("train_length") or DEFAULT_TRAIN_LENGTH),
+            fault_speed_limit=(
+                float(item["fault_speed_limit"])
+                if item.get("fault_speed_limit") is not None
+                else None
+            ),
+            emergency_brake=bool(item.get("emergency_brake", False)),
         )
         for item in train_states
     ]
@@ -147,6 +156,23 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
 
     distance_to_ma = ma_limit - vehicle.position
     signal_rule = _resolve_signal_rule(distance_to_ma, route["speed_limit"], vehicle.speed)
+    static_limit = find_static_speed_limit(vehicle.position)
+    speed_limit_rule = resolve_speed_limit(
+        permission=signal_rule["permission"],
+        route_speed_limit=route["speed_limit"],
+        static_speed_limit=static_limit.get("speed_limit") if static_limit else None,
+        static_speed_limit_id=static_limit.get("limit_id") if static_limit else None,
+        fault_speed_limit=vehicle.fault_speed_limit,
+        braking_curve_speed_limit=signal_rule["braking_curve_speed_limit"],
+        emergency_brake=vehicle.emergency_brake,
+    )
+    permission = speed_limit_rule.get("permission_override", signal_rule["permission"])
+    signal_state = speed_limit_rule.get("signal_state_override", signal_rule["signal_state"])
+    speed_limit = speed_limit_rule["speed_limit"]
+    if permission == "stop":
+        target_speed = 0.0
+    else:
+        target_speed = min(signal_rule["target_speed"], speed_limit)
     protection_margin = (
         (front_train_length or 0.0)
         + LOCATION_UNCERTAINTY
@@ -160,10 +186,10 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "route_id": vehicle.route_id,
         "ma_limit": round(ma_limit, 1),
         "distance_to_ma": round(distance_to_ma, 1),
-        "permission": signal_rule["permission"],
-        "signal_state": signal_rule["signal_state"],
-        "speed_limit": signal_rule["speed_limit"],
-        "target_speed": signal_rule["target_speed"],
+        "permission": permission,
+        "signal_state": signal_state,
+        "speed_limit": speed_limit,
+        "target_speed": round(max(target_speed, 0.0), 1),
         "reason": reason,
         "front_vehicle_id": front_vehicle_id,
         "front_train_length": front_train_length,
@@ -173,11 +199,19 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "front_protection_point": round(front_protection_point, 1) if front_protection_point is not None else None,
         "safe_distance": protection_margin if front_vehicle else SAFE_DISTANCE,
         "current_speed": vehicle.speed,
-        "route_speed_limit": route["speed_limit"],
+        "route_speed_limit": speed_limit_rule["route_speed_limit"],
+        "static_speed_limit": speed_limit_rule["static_speed_limit"],
+        "static_speed_limit_id": speed_limit_rule["static_speed_limit_id"],
+        "static_speed_limit_source": static_limit.get("source") if static_limit else None,
+        "static_speed_limit_related_switch_id": (
+            static_limit.get("related_switch_id") if static_limit else None
+        ),
+        "fault_speed_limit": speed_limit_rule["fault_speed_limit"],
+        "speed_limit_reason": speed_limit_rule["speed_limit_reason"],
         "required_stop_distance": signal_rule["required_stop_distance"],
         "emergency_stop_distance": signal_rule["emergency_stop_distance"],
         "warning_distance": signal_rule["warning_distance"],
-        "braking_curve_speed_limit": signal_rule["braking_curve_speed_limit"],
+        "braking_curve_speed_limit": speed_limit_rule["braking_curve_speed_limit"],
         "braking_model": "simplified_atp_braking_curve",
     }
 

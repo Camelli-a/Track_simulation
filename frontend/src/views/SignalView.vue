@@ -130,6 +130,12 @@
           </div>
           <span class="text-xs text-gray-300">{{ light.signal_id }}</span>
           <span class="text-[10px] text-gray-500">{{ light.position }} m</span>
+          <span v-if="light.permission" class="text-[10px] px-2 py-0.5 rounded-full" :class="permissionBadge(light.permission)">
+            {{ permissionLabel(light.permission) }}
+          </span>
+          <p class="text-[10px] text-center leading-4 text-gray-500">
+            {{ light.route_id ?? '未上报进路' }} · {{ signalStateLabel(light.signal_state ?? light.state) }}
+          </p>
         </div>
       </div>
     </div>
@@ -145,6 +151,8 @@
               <th class="text-right">位置</th>
               <th class="text-right">状态</th>
               <th class="text-right">锁闭</th>
+              <th class="text-right">锁闭进路</th>
+              <th class="text-right">原因</th>
             </tr>
           </thead>
           <tbody>
@@ -164,9 +172,11 @@
                   {{ t.locked ? '锁闭' : '解锁' }}
                 </span>
               </td>
+              <td class="text-right text-gray-400">{{ t.locked_by_route_id ?? '—' }}</td>
+              <td class="text-right text-gray-400">{{ reasonLabel(t.reason) }}</td>
             </tr>
             <tr v-if="!store.turnouts.length">
-              <td colspan="4" class="py-8 text-center text-gray-600">暂无道岔数据</td>
+              <td colspan="6" class="py-8 text-center text-gray-600">暂无道岔数据</td>
             </tr>
           </tbody>
         </table>
@@ -185,6 +195,10 @@
               <th class="text-right">MA 终点</th>
               <th class="text-right">授权长度</th>
               <th class="text-right">剩余距离</th>
+              <th class="text-right">进路</th>
+              <th class="text-right">许可</th>
+              <th class="text-right">信号</th>
+              <th class="text-right">前车 / 安全间距</th>
             </tr>
           </thead>
           <tbody>
@@ -206,9 +220,16 @@
               <td class="text-right text-gray-400">
                 {{ v.ma_limit != null ? (v.ma_limit - v.position).toFixed(1) + ' m' : '—' }}
               </td>
+              <td class="text-right text-gray-400">{{ v.ma_route_id ?? '—' }}</td>
+              <td class="text-right" :class="permissionTextClass(v.ma_permission)">{{ permissionLabel(v.ma_permission) }}</td>
+              <td class="text-right text-gray-400">{{ signalStateLabel(v.ma_signal_state) }}</td>
+              <td class="text-right text-gray-400">
+                {{ v.ma_front_vehicle_id ?? '无前车' }}
+                <span v-if="v.ma_safe_distance != null"> · {{ v.ma_safe_distance }} m</span>
+              </td>
             </tr>
             <tr v-if="!store.vehicles.length">
-              <td colspan="5" class="py-8 text-center text-gray-600">暂无列车 MA 数据</td>
+              <td colspan="9" class="py-8 text-center text-gray-600">暂无列车 MA 数据</td>
             </tr>
           </tbody>
         </table>
@@ -293,7 +314,24 @@ const occupiedSegments = computed(() =>
   store.trackSegments.filter((segment) => segment.occupied)
 )
 
-const interlockingConflicts = computed(() => {
+const protocolRouteConflicts = computed(() =>
+  store.routeResults
+    .filter((result) => !result.allowed)
+    .map((result) => ({
+      id: `route-${result.vehicle_id}-${result.route_id}`,
+      level: 'high',
+      kind: '协议进路冲突',
+      title: `${result.vehicle_id ?? '未知列车'} 的 ${result.route_id ?? '未命名进路'} 不满足联锁条件`,
+      turnoutLabel: result.required_switch_id ?? '未上报道岔',
+      segmentLabel: result.locked_by_route_id ? `被进路 ${result.locked_by_route_id} 占用/锁闭` : '需结合区段状态继续核对',
+      signalLabel: result.current_position
+        ? `当前 ${isReverseState(result.current_position) ? '反位' : '定位'} → 需要 ${isReverseState(result.required_position) ? '反位' : '定位'}`
+        : '未上报当前位置',
+      detail: `后端返回原因：${reasonLabel(result.reason)}。建议优先核对 ${result.required_switch_id ?? '对应道岔'} 的锁闭方和所需位置。`,
+    }))
+)
+
+const heuristicConflicts = computed(() => {
   const conflicts = []
 
   for (const turnout of store.turnouts) {
@@ -370,11 +408,36 @@ const interlockingConflicts = computed(() => {
     })
   }
 
-  return conflicts.slice(0, 12)
+  return conflicts
 })
+
+const interlockingConflicts = computed(() =>
+  [...protocolRouteConflicts.value, ...heuristicConflicts.value].slice(0, 12)
+)
 
 function isReverseState(state) {
   return state === 'reverse' || state === 'diverging'
+}
+
+function permissionLabel(permission) {
+  if (permission === 'allow') return '允许'
+  if (permission === 'restricted') return '受限'
+  if (permission === 'stop') return '停车'
+  return permission ?? '—'
+}
+
+function permissionBadge(permission) {
+  if (permission === 'stop') return 'bg-red-950 text-red-300'
+  if (permission === 'restricted') return 'bg-amber-950 text-amber-300'
+  if (permission === 'allow') return 'bg-emerald-950 text-emerald-300'
+  return 'bg-gray-900 text-gray-500'
+}
+
+function permissionTextClass(permission) {
+  if (permission === 'stop') return 'text-red-300'
+  if (permission === 'restricted') return 'text-amber-300'
+  if (permission === 'allow') return 'text-emerald-300'
+  return 'text-gray-400'
 }
 
 function signalStateLabel(state) {
@@ -383,6 +446,18 @@ function signalStateLabel(state) {
 
 function aspectText(aspect) {
   return { red: '红灯', yellow: '黄灯', green: '绿灯' }[aspect] ?? aspect ?? '未知'
+}
+
+function reasonLabel(reason) {
+  if (!reason) return '—'
+  return {
+    route_locked_conflict: '进路锁闭冲突',
+    switch_locked_conflict: '道岔锁闭冲突',
+    route_available: '进路可用',
+    route_locked: '进路已锁闭',
+    front_vehicle_protection: '前车防护',
+    route_end: '进路终点',
+  }[reason] ?? reason
 }
 
 function nearestSignal(position) {

@@ -25,7 +25,7 @@
             轨道仿真系统
           </h1>
           <p class="mt-2 max-w-[16rem] text-xs leading-5 text-slate-400">
-            调度、供电、车辆、线路与信号的统一可视化监控台。
+            面向调度员的三视角工作台：全线态势、列车驾驶室、供电与故障。
           </p>
         </div>
         <button
@@ -49,11 +49,9 @@
       </div>
 
       <nav class="mt-6 space-y-3">
-        <NavItem to="/dashboard" label="OCC 大屏" icon="◫" hint="全局态势与告警总览" />
-        <NavItem to="/power" label="供电仿真" icon="⌁" hint="网压、电流与功率波动" />
-        <NavItem to="/vehicle" label="车辆仿真" icon="▣" hint="列车状态、停车精度与控车" />
-        <NavItem to="/track" label="轨道仿真" icon="≋" hint="线路区段、车站与剖面" />
-        <NavItem to="/signal" label="信号系统" icon="◎" hint="闭塞、道岔与移动授权" />
+        <NavItem to="/line" label="全线态势" icon="◫" hint="线路、信号、联锁与 MA 总览" />
+        <NavItem to="/cab" label="列车驾驶室" icon="▣" hint="单车监督、制动曲线与控车反馈" />
+        <NavItem to="/power" label="供电与故障" icon="⌁" hint="网压健康、分车负荷与故障回放" />
       </nav>
 
       <div class="mt-auto space-y-3">
@@ -135,9 +133,14 @@
             :connecting="sim.connecting"
             :data-stale="sim.dataStale"
             :freshness-label="freshnessLabel"
+            :message-time-label="messageTimeLabel"
             :scene-label="ui.sceneLabel"
             :mode-label="modeLabel"
             :data-source="sim.dataSource"
+            :zmq-connected="sim.systemInfo?.zmq_connected ?? sim.communication?.zmq_connected ?? null"
+            :websocket-clients="sim.systemInfo?.websocket_clients ?? null"
+            :latency-label="latencyLabel"
+            :protocol-version="sim.protocolVersion"
           />
         </div>
 
@@ -150,6 +153,8 @@
           :power-fault="sim.power?.is_fault ?? false"
           :last-error="sim.lastError"
           :alarms="sim.alarms"
+          :comm-state="sim.communication"
+          :route-results="sim.routeResults"
         />
 
         <div class="flex-1">
@@ -189,6 +194,12 @@ useKeyboardControl(sim)
 const isEmergency = computed(() => sim.systemMode === 'emergency')
 const currentTime = ref(Date.now())
 const clockLabel = computed(() => formatClock(currentTime.value))
+const messageTimeLabel = computed(() =>
+  sim.protocolMessageAt ? formatClock(sim.protocolMessageAt) : null
+)
+const latencyLabel = computed(() =>
+  sim.communication?.latency_ms != null ? `${Number(sim.communication.latency_ms).toFixed(1)} ms` : null
+)
 
 const modeLabel = computed(() => {
   if (sim.systemMode === 'emergency') return '紧急模式'
@@ -206,10 +217,10 @@ const freshnessLabel = computed(() => {
 })
 
 const keyboardHint = computed(() => {
-  if (route.path === '/vehicle') {
+  if (route.path === '/cab') {
     return '手动模式车辆可使用 ↑ 牵引、↓ 制动、Space 紧急制动。'
   }
-  return '当前页以监视为主；若需控车，请切换到“车辆仿真”页面。'
+  return '当前页以监视为主；若需控车，请切换到“列车驾驶室”页面。'
 })
 
 let clockTimer = null

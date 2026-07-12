@@ -107,7 +107,11 @@ def test_far_from_ma_is_allow_green():
     ma_limit = _ma_for(snapshot, "TRAIN-001")
     assert ma_limit["permission"] == "allow"
     assert ma_limit["signal_state"] == "green"
-    assert ma_limit["speed_limit"] == 80.0
+    assert ma_limit["speed_limit"] == 48.0
+    assert ma_limit["route_speed_limit"] == 80.0
+    assert ma_limit["static_speed_limit"] == 48.0
+    assert ma_limit["static_speed_limit_id"] == "SL-001"
+    assert ma_limit["speed_limit_reason"] == "static_limit"
 
 
 def test_distance_to_ma_between_80_and_200_is_restricted():
@@ -135,6 +139,7 @@ def test_distance_to_ma_between_80_and_200_is_restricted():
     assert ma_limit["signal_state"] == "yellow"
     assert 0.0 < ma_limit["speed_limit"] <= ma_limit["route_speed_limit"]
     assert ma_limit["braking_curve_speed_limit"] == ma_limit["speed_limit"]
+    assert ma_limit["speed_limit_reason"] == "braking_curve"
 
 
 def test_distance_to_ma_at_or_below_80_is_stop():
@@ -160,6 +165,85 @@ def test_distance_to_ma_at_or_below_80_is_stop():
     assert ma_limit["permission"] == "stop"
     assert ma_limit["signal_state"] == "red"
     assert ma_limit["speed_limit"] == 0.0
+    assert ma_limit["speed_limit_reason"] == "stop"
+
+
+def test_ma_limit_includes_static_speed_limit():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 300.0,
+                "speed": 40.0,
+                "route_id": "R_MAIN",
+            }
+        ]
+    )
+
+    ma_limit = _ma_for(snapshot, "TRAIN-001")
+    assert ma_limit["static_speed_limit"] == 48.0
+    assert ma_limit["static_speed_limit_id"] == "SL-001"
+    assert ma_limit["static_speed_limit_source"] == "teacher_static_speed_limit_table"
+    assert ma_limit["static_speed_limit_related_switch_id"] is None
+    assert "speed_limit_reason" in ma_limit
+
+
+def test_static_limit_caps_speed_limit():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 300.0,
+                "speed": 20.0,
+                "route_id": "R_MAIN",
+            }
+        ]
+    )
+
+    ma_limit = _ma_for(snapshot, "TRAIN-001")
+    assert ma_limit["permission"] == "allow"
+    assert ma_limit["speed_limit"] == 48.0
+    assert ma_limit["speed_limit_reason"] == "static_limit"
+
+
+def test_emergency_brake_forces_stop_in_ma_limit():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 620.0,
+                "speed": 20.0,
+                "route_id": "R_MAIN",
+                "emergency_brake": True,
+            }
+        ]
+    )
+
+    ma_limit = _ma_for(snapshot, "TRAIN-001")
+    assert ma_limit["permission"] == "stop"
+    assert ma_limit["signal_state"] == "red"
+    assert ma_limit["speed_limit"] == 0.0
+    assert ma_limit["target_speed"] == 0.0
+    assert ma_limit["speed_limit_reason"] == "emergency_brake"
+
+
+def test_fault_speed_limit_participates_in_ma_limit():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 620.0,
+                "speed": 20.0,
+                "route_id": "R_MAIN",
+                "fault_speed_limit": 30.0,
+            }
+        ]
+    )
+
+    ma_limit = _ma_for(snapshot, "TRAIN-001")
+    assert ma_limit["speed_limit"] == 30.0
+    assert ma_limit["fault_speed_limit"] == 30.0
+    assert ma_limit["speed_limit_reason"] == "fault_limit"
 
 
 def test_branch_route_request_conflicts_with_locked_main_switch():
@@ -390,13 +474,17 @@ def test_signal_zmq_adapter_publishes_signal_state_and_ma_state_without_wrapping
     )
 
     topics = [topic for topic, _ in fake_bus.published]
-    assert topics == ["signal_state", "ma_state"]
+    assert topics == ["signal_state", "ma_state", "ato_command"]
 
     signal_data = fake_bus.published[0][1]
     ma_data = fake_bus.published[1][1]
+    ato_data = fake_bus.published[2][1]
     assert "type" not in signal_data
     assert "timestamp" not in signal_data
     assert "type" not in ma_data
     assert "timestamp" not in ma_data
+    assert "type" not in ato_data
+    assert "timestamp" not in ato_data
     assert {"system_mode", "signals", "sections", "switches", "route_results"} <= set(signal_data)
     assert set(ma_data) == {"ma_limits"}
+    assert set(ato_data) == {"commands"}

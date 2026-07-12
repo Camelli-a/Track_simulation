@@ -14,8 +14,10 @@ from app.services.signal_hardware_adapter import (  # noqa: E402
     build_train_control_suggestion,
     map_signal_state_to_hardware_code,
     map_switch_position_to_hardware_code,
+    map_switch_to_hardware_code,
     normalize_hardware_train_state,
 )
+from app.services.signal_control import calculate_signal_snapshot  # noqa: E402
 
 
 def test_normalize_hardware_train_state_converts_704_fields():
@@ -61,11 +63,50 @@ def test_normalize_hardware_train_state_maps_down_direction():
     assert train_state["direction_code"] == 0xAA
 
 
+def test_hardware_normalized_fault_speed_limit_participates():
+    train_state = normalize_hardware_train_state(
+        {
+            "train_id": "1",
+            "speed_cm_s": 1000,
+            "distance_cm": 62000,
+            "direction_code": 0x55,
+            "fault_speed_limit_cm_s": 500,
+        }
+    )
+
+    snapshot = calculate_signal_snapshot([train_state])
+    ma_limit = snapshot["ma_limits"][0]
+
+    assert train_state["fault_speed_limit"] == 18.0
+    assert ma_limit["fault_speed_limit"] == 18.0
+    assert ma_limit["speed_limit"] == 18.0
+    assert ma_limit["speed_limit_reason"] == "fault_limit"
+
+
 def test_map_switch_position_to_hardware_code():
     assert map_switch_position_to_hardware_code("normal") == 0x01
     assert map_switch_position_to_hardware_code("Reverse") == 0x02
     assert map_switch_position_to_hardware_code("fault") == 0x04
     assert map_switch_position_to_hardware_code(None) == 0x00
+
+
+def test_hardware_adapter_maps_locked_normal_and_locked_reverse():
+    assert (
+        map_switch_to_hardware_code({"state": "locked_normal", "position": "normal"})
+        == 0x01
+    )
+    assert (
+        map_switch_to_hardware_code({"state": "locked_reverse", "position": "reverse"})
+        == 0x02
+    )
+
+
+def test_hardware_adapter_maps_fault_and_four_open():
+    assert map_switch_to_hardware_code({"state": "fault", "position": "normal"}) == 0x04
+    assert (
+        map_switch_to_hardware_code({"state": "four_open", "position": "reverse"})
+        == 0x04
+    )
 
 
 def test_map_signal_state_to_hardware_code():

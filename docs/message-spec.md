@@ -214,8 +214,8 @@
         "distance_to_ma": 155.0,
         "permission": "restricted",
         "signal_state": "yellow",
-        "speed_limit": 51.8,
-        "target_speed": 51.8,
+        "speed_limit": 48.0,
+        "target_speed": 48.0,
         "reason": "front_vehicle_protection",
         "front_vehicle_id": "TRAIN-002",
         "front_train_length": 118.0,
@@ -225,10 +225,16 @@
         "front_protection_point": 455.0,
         "current_speed": 40.0,
         "route_speed_limit": 80.0,
+        "static_speed_limit": 48.0,
+        "static_speed_limit_id": "SL-001",
+        "static_speed_limit_source": "teacher_static_speed_limit_table",
+        "static_speed_limit_related_switch_id": null,
+        "fault_speed_limit": null,
         "required_stop_distance": 108.4,
         "emergency_stop_distance": 98.1,
         "warning_distance": 158.4,
         "braking_curve_speed_limit": 51.8,
+        "speed_limit_reason": "static_limit",
         "braking_model": "simplified_atp_braking_curve"
       }
     ]

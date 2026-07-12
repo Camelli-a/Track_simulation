@@ -247,6 +247,7 @@ POST /api/v1/dashboard/route-request
 | `position` | number | m | 当前里程位置 |
 | `speed` | number | km/h | 当前速度 |
 | `acceleration` | number | m/s² | 当前加速度 |
+| `train_length` | number/null | m | 列车长度，供信号 MA 计算使用 |
 | `mode` | string | - | `manual` / `ato` / `atp` / `emergency` / `unknown` |
 | `is_running` | boolean | - | 是否运行中 |
 | `emergency_brake` | boolean | - | 是否紧急制动 |
@@ -371,7 +372,26 @@ POST /api/v1/dashboard/route-request
 | `current_position` | string/null | 当前道岔位置 |
 | `locked_by_route_id` | string/null | 当前锁闭进路 |
 
-### 9. power
+### 9. route_requests
+
+`route_requests` 保存 data_flow 收到或发出的进路申请，用于联调“车辆申请进路 -> 信号模块计算 -> 返回 route_results/ma_state”这条链路。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `request_id` | string/null | 进路申请编号 |
+| `vehicle_id` | string | 申请车辆 |
+| `route_id` | string | 申请进路 |
+| `origin_section_id` | string/null | 起始区段 |
+| `destination_section_id` | string/null | 目标区段 |
+| `start_position` | number/null | 起点位置 |
+| `end_position` | number/null | 终点位置 |
+| `priority` | number | 优先级 |
+| `status` | string | `pending` / `accepted` / `rejected` / `unknown` |
+| `reason` | string/null | 状态原因 |
+| `updated_at` | number | 更新时间 |
+| `raw_data` | object | 原始输入 |
+
+### 10. power
 
 | 字段 | 类型 | 单位 | 说明 |
 |---|---|---|---|
@@ -383,7 +403,7 @@ POST /api/v1/dashboard/route-request
 | `updated_at` | number/null | s | 更新时间 |
 | `raw_data` | object | - | 原始输入 |
 
-### 10. alarms
+### 11. alarms
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -452,10 +472,14 @@ POST /api/v1/dashboard/route-request
 | topic | 发送方 | data_flow 处理 |
 |---|---|---|
 | `train_state` | 车辆模块 / Mock | 更新 `trains` |
+| `vehicle_register` / `vehicle_spawn` / `add_vehicle` | 前端 / 车辆模块 | 新增或更新 `trains` 中的车辆 |
+| `set_train_state` | 前端 / 测试脚本 / 车辆模块 | 设置车辆初始状态或手动修正车辆状态 |
 | `driver_input` | 通信模块 / 前端控车 | 更新 `driver_inputs` |
 | `ato_command` | ATO / 前端控车 | 更新 `ato_commands` |
 | `signal_state` | 信号模块 | 更新 `sections/signals/switches/route_results/system_mode` |
 | `ma_state` | 信号模块 | 更新 `ma_limits`，并同步到对应 `trains` |
+| `route_request` / `route_apply` / `route_application` | 前端 / 车辆模块 / 调度逻辑 | 更新 `route_requests` |
+| `route_result` | 信号模块 | 追加更新 `route_results` |
 | `track_info` | 轨道模块 / 后端发布 | 更新线路区段静态信息 |
 | `power_state` | 供电模块 / Mock | 更新 `power` |
 | `comm_state` | 通信模块 | 更新 `communication` |

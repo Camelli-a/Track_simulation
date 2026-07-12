@@ -38,6 +38,29 @@ Frontend student D:
 - Prefer protocol field names below.
 - Every ZMQ message should include `type` and `timestamp`.
 - Field naming uses `snake_case`.
+- External formal protocols are adapted before entering data_flow. For example,
+  vehicle UDP/API, driver desk TCP, signal UDP, power adapters, and view-system
+  packets should be parsed by their own adapter modules first, then published to
+  the internal topics described here.
+- data_flow is the platform aggregation layer. It stores the latest normalized
+  states, marks data freshness, and exposes dashboard snapshots to the frontend.
+  It does not own subsystem algorithms or raw binary protocol parsing.
+- Management topics such as `add_train`, `remove_train`, `clear_trains`, and
+  `reset_trains` are consumed by vehicle-management modules. data_flow ignores
+  them as dashboard state and waits for the resulting `train_state` messages.
+- Command result topics such as `command_ack`, `vehicle_management_result`, and
+  `train_registry` can be published by subsystem modules after a command is
+  actually applied. data_flow caches these acknowledgements in the dashboard
+  snapshot so the frontend does not need to trust `published=true` alone.
+- Snapshot records can include `source`, `protocol`, `adapter`, `received_at`,
+  `stale_after_seconds`, and `is_stale` so reviewers can distinguish mock data,
+  internal ZMQ data, and formal-protocol adapter data.
+- In ZMQ mode, `zmq_connected` means data_flow recently received a valid module
+  message. A socket subscription alone is not treated as a healthy connection.
+- Fields with explicit units are converted at the data_flow boundary:
+  `km_post`/`kilometerPost` are kilometers to meters, `*Cm` fields are
+  centimeters to meters, `*Mps` speed fields are m/s to km/h, `voltageKv` is kV
+  to V, `currentKa` is kA to A, and `powerMw` is MW to kW.
 - Units:
   - `position`, `start`, `end`, `ma_limit`: meters
   - `speed`, `target_speed`: km/h
@@ -49,6 +72,30 @@ Frontend student D:
   - `current`: A
   - `power`: kW
   - `timestamp`: Unix timestamp in seconds
+
+## External Protocol Adapter Mapping
+
+The current platform uses ZMQ JSON as its internal bus. Formal protocol packets
+from the requirement document should enter data_flow through adapters:
+
+| External input | Adapter responsibility | Internal topic |
+| --- | --- | --- |
+| Vehicle UDP 20 ms / API 500 ms | Decode train slots, speed, acceleration, mileage, direction, active cab | `train_state` / `driver_input` |
+| Driver desk PLC TCP | Decode handle, door, brake, ATO/ATP, parking state | `driver_input` / `train_state` |
+| Signal subsystem | Convert route, switch, signal, section, MA results | `signal_state` / `ma_state` |
+| Traction power subsystem | Convert voltage, current, power, fault flags | `power_state` |
+| Track/view subsystem | Convert section, edge, signal, switch and visible-train state | `track_info` / `signal_state` / `train_state` |
+
+Recommended metadata values:
+
+| Source | Protocol | Adapter |
+| --- | --- | --- |
+| `vehicle_udp` | `formal_vehicle_udp` | `vehicle_udp_codec` |
+| `vehicle_api` | `formal_vehicle_api` | `vehicle_api_codec` |
+| `driver_tcp` | `formal_driver_plc_tcp` | `driver_desk_source` |
+| `signal_zmq` | `internal_signal_zmq` | `signal_zmq_adapter` |
+| `power_adapter` | `power_adapter` | `power_adapter` |
+| `track_adapter` | `track_adapter` | `track_adapter` |
 
 ## ZMQ Input Messages
 

@@ -55,18 +55,20 @@ class MessageRouter:
             return self.train_manager.reset_trains(int(message.get("count", 10)))
 
     def _handle_driver_input(self, msg: dict):
-        vehicle_id = msg.get("vehicle_id")
-        if not isinstance(vehicle_id, str) or not vehicle_id:
-            return {"ok": False, "reason": "driver_input_requires_vehicle_id"}
         source = str(msg.get("source", "mock")).lower()
-        if source in {"driver_tcp", "driver_desk", "driver_plc", "plc"} and (
-            vehicle_id != self.physical_driver_vehicle_id
-        ):
-            return {
-                "ok": False,
-                "reason": "physical_driver_vehicle_mismatch",
-                "vehicle_id": vehicle_id,
-            }
+        physical_source = source in {"driver_tcp", "driver_desk", "driver_plc", "plc"}
+        if physical_source:
+            vehicle_id = msg.get("vehicle_id")
+            if not isinstance(vehicle_id, str) or not vehicle_id:
+                return {"ok": False, "reason": "driver_input_requires_vehicle_id"}
+            if vehicle_id != self.physical_driver_vehicle_id:
+                return {
+                    "ok": False,
+                    "reason": "physical_driver_vehicle_mismatch",
+                    "vehicle_id": vehicle_id,
+                }
+        else:
+            vehicle_id = self._resolve_vehicle_id(msg)
         train = self.train_manager.get_train(vehicle_id)
         if train is None:
             return {"ok": False, "reason": "train_not_found", "vehicle_id": vehicle_id}
@@ -110,6 +112,7 @@ class MessageRouter:
             traction_percent=control.traction_percent,
             brake_percent=control.brake_percent,
             direction_code=direction_code,
+            emergency_cmd=bool(msg.get("emergency_cmd", False)),
             key_switch=msg.get("key_switch"),
             ato_start_btn=bool(msg.get("ato_start_btn", False)),
             ato_capable=msg.get("ato_capable"),
@@ -144,8 +147,13 @@ class MessageRouter:
             message_id=(
                 None if msg.get("message_id") is None else str(msg["message_id"])
             ),
+            raw_brake_level=msg.get("brake_level"),
+            fast_brake=control.handle_mode == "fast_brake",
         )
         train.step_manual(driver_input, self.default_dt)
+        if driver_input.emergency_button or driver_input.emergency_cmd:
+            train.state.emergency_brake = True
+            train.state.mode = "emergency"
         return {"ok": True, "vehicle_id": vehicle_id}
 
     def _handle_ato_command(self, msg: dict):

@@ -53,6 +53,19 @@ class TrainState:
     auto_reverse_cap: bool = False
     auto_reverse_active: bool = False
     recommended_speed_kmh: Optional[float] = None
+    recommended_speed: float = 0.0
+    ato_state: Optional[str] = None
+    ato_target_speed_kmh: float = 0.0
+    ato_traction_level: int = 0
+    ato_brake_level: int = 0
+    commanded_traction_level: int = 0
+    commanded_brake_level: int = 0
+    applied_traction_level: int = 0
+    applied_brake_level: int = 0
+    atp_intervened: bool = False
+    stop_target: Optional[float] = None
+    distance_to_stop: Optional[float] = None
+    stop_result: Optional[dict] = None
     parking_brake: bool = False
     external_speed_limit_kmh: Optional[float] = None
     active_faults: tuple[str, ...] = ()
@@ -109,6 +122,28 @@ class TrainState:
             "auto_reverse_cap": self.auto_reverse_cap,
             "auto_reverse_active": self.auto_reverse_active,
             "recommended_speed_kmh": self.recommended_speed_kmh,
+            "recommended_speed": (
+                None
+                if self.recommended_speed_kmh is None
+                else round(self.recommended_speed_kmh, 3)
+            ),
+            "ato_state": self.ato_state,
+            "ato_target_speed_kmh": round(self.ato_target_speed_kmh, 3),
+            "ato_target_speed": round(self.ato_target_speed_kmh, 3),
+            "ato_traction_level": self.ato_traction_level,
+            "ato_brake_level": self.ato_brake_level,
+            "commanded_traction_level": self.commanded_traction_level,
+            "commanded_brake_level": self.commanded_brake_level,
+            "applied_traction_level": self.applied_traction_level,
+            "applied_brake_level": self.applied_brake_level,
+            "atp_intervened": self.atp_intervened,
+            "stop_target": (
+                None if self.stop_target is None else round(self.stop_target, 3)
+            ),
+            "distance_to_stop": (
+                None if self.distance_to_stop is None else round(self.distance_to_stop, 3)
+            ),
+            "stop_result": self.stop_result,
             "door_state": self.door_state,
             "left_door_open": self.left_door_open,
             "right_door_open": self.right_door_open,
@@ -142,6 +177,7 @@ class DriverInput:
     traction_percent: Optional[float] = None
     brake_percent: Optional[float] = None
     direction_code: Optional[int] = None
+    emergency_cmd: Optional[bool] = None
     key_switch: Optional[bool] = None
     ato_start_btn: bool = False
     ato_capable: Optional[bool] = None
@@ -172,6 +208,8 @@ class DriverInput:
     wash_mode_switch: bool = False
     frame_seq: Optional[int] = None
     message_id: Optional[str] = None
+    raw_brake_level: Optional[int] = None
+    fast_brake: bool = False
 
 
 @dataclass

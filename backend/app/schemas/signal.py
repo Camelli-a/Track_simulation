@@ -57,6 +57,12 @@ class MovementAuthorityLimit(BaseModel):
     safe_distance: float
     current_speed: float
     route_speed_limit: float
+    static_speed_limit: Optional[float] = None
+    static_speed_limit_id: Optional[str] = None
+    static_speed_limit_source: Optional[str] = None
+    static_speed_limit_related_switch_id: Optional[str] = None
+    fault_speed_limit: Optional[float] = None
+    speed_limit_reason: Optional[str] = None
     required_stop_distance: float
     emergency_stop_distance: float
     warning_distance: float
