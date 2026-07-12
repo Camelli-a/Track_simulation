@@ -144,11 +144,23 @@ update_dynamics(...)
 
 支持的方法：
 
-- `step_manual(driver_input, dt)`
-- `step_ato(ato_command, dt)`
+- `step_manual(driver_input, dt)`：只缓存司机请求，不推进动力学
+- `step_ato(ato_command, dt)`：只缓存兼容 ATO 请求，不推进动力学
+- `step_tick(dt)`：唯一动力学周期入口，每次只执行一次积分
 - `apply_ma_state(ma_limit)`
 - `apply_power_state(power)`
 - `apply_comm_state(comm)`
+- `has_valid_ma(now)`
+- `get_distance_to_ma_m(now)`
+- `get_effective_speed_limit_kmh(now)`
+
+控制输入到达后只更新 `requested_traction_level` / `requested_brake_level`。
+`step_tick(dt)` 在周期边界选择 AM/SM 控制源、执行制动优先、MA 牵引封锁与
+ATP 覆盖，再把最终级位交给 `_step(...)`。`current_traction_level` /
+`current_brake_level` 表示上一周期实际施加的级位。
+
+MA 默认有效期为 `1.6 s`。相对距离缺失时可由绝对 MA 终点和当前位置推导；
+字段非法、许可/信号冲突、通信失效或数据过期时，AM 禁止继续牵引。
 
 每辆车都有独立状态：
 
@@ -371,4 +383,4 @@ pyzmq==26.0.3
 1. 和后端同学确认 ZMQ 的 `bind/connect` 关系。
 2. 把现在的手动测试整理成自动测试文件，方便以后改代码时快速确认没坏。
 3. 如果后面需要正式多车运行，再增加 `main_train_process.py`，实现一辆车一个进程。
-4. 后续对接 B 同学的 ATO 时，只需要把收到的 `ato_command` 转成当前 `AtoCommand` 数据结构，再调用 `train.step_ato(...)`。
+4. 后续对接车载 ATO 时，控制器只生成候选级位；由 `step_tick(dt)` 在周期边界统一选择命令、执行 ATP 裁决并推进动力学。

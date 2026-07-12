@@ -157,14 +157,15 @@ def test_router_accepts_command_percent_input():
     router.handle(
         {
             "type": "driver_input",
-            "train_index": 1,
+            "vehicle_id": "TRAIN-001",
             "command": 1,
             "percent": 50.0,
         }
     )
     train = manager.get_train("TRAIN-001")
-    assert train.current_traction_level == 2
-    assert train.current_brake_level == 0
+    assert train.requested_traction_level == 2
+    assert train.requested_brake_level == 0
+    assert train.current_traction_level == 0
 
 
 def test_router_set_train_state_creates_missing_train():

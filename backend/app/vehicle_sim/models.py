@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 import time
 
+from .vehicle_parameters import TRAIN_LENGTH_M
+
 
 Mode = Literal["manual", "ato", "atp", "emergency"]
 
@@ -29,6 +31,31 @@ class TrainState:
     section_id: Optional[str] = None
     edge_offset_m: Optional[float] = None
     direction_code: int = 1
+    door_state: str = "closed"
+    left_door_open: bool = False
+    right_door_open: bool = False
+    doors_all_closed: bool = True
+    door_mode: str = "auto"
+    door_closed_light: bool = True
+    high_voltage_light: bool = True
+    brake_bad_light: bool = False
+    traction_level: int = 0
+    brake_level: int = 0
+    traction_percent: float = 0.0
+    brake_percent: float = 0.0
+    actual_traction_force_n: float = 0.0
+    actual_brake_force_n: float = 0.0
+    atp_intervention: bool = False
+    driving_mode: str = "SM"
+    control_source: str = "none"
+    ato_active: bool = False
+    ato_capable: bool = False
+    auto_reverse_cap: bool = False
+    auto_reverse_active: bool = False
+    recommended_speed_kmh: Optional[float] = None
+    parking_brake: bool = False
+    external_speed_limit_kmh: Optional[float] = None
+    active_faults: tuple[str, ...] = ()
 
     @property
     def speed_kmh(self) -> float:
@@ -42,10 +69,17 @@ class TrainState:
             "vehicle_id": self.vehicle_id,
             "train_index": self.train_index,
             "line_id": self.line_id,
+            "train_length": TRAIN_LENGTH_M,
             "position": round(self.position, 3),
             "speed": round(self.speed_kmh, 3),
             "acceleration": round(self.acceleration, 3),
+            "position_m": round(self.position, 3),
+            "speed_mps": round(self.speed_ms, 3),
+            "speed_kmh": round(self.speed_kmh, 3),
+            "vehicle_speed_kmh": round(self.speed_kmh, 3),
+            "acceleration_mps2": round(self.acceleration, 3),
             "mode": self.mode,
+            "control_mode": self.mode,
             "is_running": self.is_running,
             "emergency_brake": self.emergency_brake,
             "edge_id": self.edge_id,
@@ -54,6 +88,40 @@ class TrainState:
                 None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
             ),
             "direction_code": self.direction_code,
+            "direction": (
+                "reverse"
+                if self.direction_code < 0
+                else "neutral"
+                if self.direction_code == 0
+                else "forward"
+            ),
+            "traction_level": self.traction_level,
+            "brake_level": self.brake_level,
+            "traction_percent": round(self.traction_percent, 3),
+            "brake_percent": round(self.brake_percent, 3),
+            "actual_traction_force_n": round(self.actual_traction_force_n, 3),
+            "actual_brake_force_n": round(self.actual_brake_force_n, 3),
+            "atp_intervention": self.atp_intervention,
+            "driving_mode": self.driving_mode,
+            "control_source": self.control_source,
+            "ato_active": self.ato_active,
+            "ato_capable": self.ato_capable,
+            "auto_reverse_cap": self.auto_reverse_cap,
+            "auto_reverse_active": self.auto_reverse_active,
+            "recommended_speed_kmh": self.recommended_speed_kmh,
+            "door_state": self.door_state,
+            "left_door_open": self.left_door_open,
+            "right_door_open": self.right_door_open,
+            "doors_all_closed": self.doors_all_closed,
+            "door_open_light": not self.doors_all_closed,
+            "door_mode": self.door_mode,
+            "door_closed_light": self.door_closed_light,
+            "high_voltage_light": self.high_voltage_light,
+            "high_voltage_on": self.high_voltage_light,
+            "brake_bad_light": self.brake_bad_light,
+            "parking_brake": self.parking_brake,
+            "external_speed_limit_kmh": self.external_speed_limit_kmh,
+            "active_faults": list(self.active_faults),
         }
 
 
@@ -67,12 +135,43 @@ class DriverInput:
     brake_level: int
     direction: str
     emergency_button: bool
+    main_handle_raw: Optional[int] = None
     command: Optional[int] = None
     percent: Optional[float] = None
     main_handle_state: Optional[int] = None
     traction_percent: Optional[float] = None
     brake_percent: Optional[float] = None
     direction_code: Optional[int] = None
+    key_switch: Optional[bool] = None
+    ato_start_btn: bool = False
+    ato_capable: Optional[bool] = None
+    ato_active: Optional[bool] = None
+    auto_reverse_cap: Optional[bool] = None
+    auto_reverse_active: Optional[bool] = None
+    auto_rev_flag: bool = False
+    mode_up_confirm: bool = False
+    mode_dn_confirm: bool = False
+    vigilance: bool = False
+    vigilance_allow: bool = False
+    forced_release: bool = False
+    parking_apply: bool = False
+    parking_release: bool = False
+    brake_bad_light: Optional[bool] = None
+    network_fault_light: Optional[bool] = None
+    open_left_door: bool = False
+    open_right_door: bool = False
+    close_left_door: bool = False
+    close_right_door: bool = False
+    door_mode: Optional[str] = None
+    door_closed_light: Optional[bool] = None
+    high_voltage_light: Optional[bool] = None
+    forced_pump: bool = False
+    horn: bool = False
+    confirm_flag: bool = False
+    trac_aux_reset: bool = False
+    wash_mode_switch: bool = False
+    frame_seq: Optional[int] = None
+    message_id: Optional[str] = None
 
 
 @dataclass
@@ -92,7 +191,7 @@ class AtoCommand:
 @dataclass
 class MaLimit:
     vehicle_id: str
-    ma_limit: float
+    ma_limit: Optional[float]
     target_speed: Optional[float]
     reason: str
     allowed_speed_kmh: Optional[float] = None
@@ -100,6 +199,7 @@ class MaLimit:
     target_distance_m: Optional[float] = None
     permission: Optional[str] = None
     signal_state: Optional[str] = None
+    updated_at: Optional[float] = None
 
 
 @dataclass

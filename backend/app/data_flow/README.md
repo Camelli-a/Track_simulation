@@ -137,6 +137,80 @@ POST /api/v1/dashboard/publish-track-info
 }
 ```
 
+### 4. 注册车辆 / 加车
+
+```http
+POST /api/v1/dashboard/vehicles/register
+```
+
+用途：
+
+- 在 data_flow 本地快照里新增或更新一辆车。
+- 同时向 ZMQ 发布 `vehicle_register` 和 `set_train_state`，方便车辆算法模块接收初始车辆状态。
+- 如果车辆算法模块暂时还没有动态加车能力，前端仍然可以先从 data_flow 快照看到这辆车。
+
+请求示例：
+
+```json
+{
+  "vehicle_id": "TRAIN-004",
+  "line_id": "LINE-1",
+  "route_id": "R_MAIN",
+  "position": 2200.0,
+  "speed": 0.0,
+  "acceleration": 0.0,
+  "train_length": 118.0,
+  "mode": "manual"
+}
+```
+
+返回示例：
+
+```json
+{
+  "accepted": true,
+  "vehicle_id": "TRAIN-004",
+  "published": true,
+  "topics": {
+    "vehicle_register": true,
+    "set_train_state": true
+  }
+}
+```
+
+### 5. 发起进路申请
+
+```http
+POST /api/v1/dashboard/route-request
+```
+
+用途：
+
+- 在 data_flow 本地快照里记录车辆进路申请。
+- 向 ZMQ 发布 `route_request`，供信号算法模块后续订阅和计算。
+
+请求示例：
+
+```json
+{
+  "vehicle_id": "TRAIN-003",
+  "route_id": "R_BRANCH",
+  "request_id": "REQ-TRAIN-003-R-BRANCH",
+  "priority": 1
+}
+```
+
+返回示例：
+
+```json
+{
+  "accepted": true,
+  "published": true,
+  "topic": "route_request",
+  "request_key": "REQ-TRAIN-003-R-BRANCH"
+}
+```
+
 ## 三、DashboardSnapshot 字段
 
 ### 1. system
@@ -510,7 +584,7 @@ POST /api/v1/dashboard/publish-track-info
       "target_speed": 51.8,
       "reason": "front_vehicle_protection",
       "front_vehicle_id": "TRAIN-002",
-      "front_train_length": 120.0,
+      "front_train_length": 118.0,
       "location_uncertainty": 5.0,
       "communication_margin": 10.0,
       "safety_margin": 30.0,

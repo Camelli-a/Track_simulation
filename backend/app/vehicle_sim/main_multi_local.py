@@ -52,6 +52,7 @@ def main():
         for i in range(args.steps):
             for train in trains:
                 train.step_manual(build_driver_input(train, i), args.dt)
+                train.step_tick(args.dt)
                 message = train.state.to_protocol()
                 print(json.dumps(message, ensure_ascii=False))
 

@@ -46,7 +46,7 @@ train_state
   "position": 300.0,
   "speed": 40.0,
   "route_id": "R_MAIN",
-  "train_length": 120.0
+  "train_length": 118.0
 }
 ```
 
@@ -189,7 +189,7 @@ ma_limit = route_end
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `DEFAULT_TRAIN_LENGTH` | `120.0` | 默认列车长度，单位 m |
+| `DEFAULT_TRAIN_LENGTH` | `118.0` | 默认列车长度，单位 m |
 | `LOCATION_UNCERTAINTY` | `5.0` | 定位误差裕量，单位 m |
 | `COMMUNICATION_MARGIN` | `10.0` | 通信 / 计算延迟折算裕量，单位 m |
 | `SAFETY_MARGIN` | `30.0` | 固定安全裕量，单位 m |
@@ -272,14 +272,14 @@ warning_distance =
       "position": 300.0,
       "speed": 40.0,
       "route_id": "R_MAIN",
-      "train_length": 120.0
+      "train_length": 118.0
     },
     {
       "vehicle_id": "TRAIN-002",
       "position": 620.0,
       "speed": 30.0,
       "route_id": "R_MAIN",
-      "train_length": 120.0
+      "train_length": 118.0
     }
   ],
   "route_requests": [

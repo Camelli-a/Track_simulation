@@ -26,6 +26,7 @@ def main():
         )
 
         train.step_manual(driver_input, dt)
+        train.step_tick(dt)
         print(json.dumps(train.state.to_protocol(), ensure_ascii=False))
 
         time.sleep(dt)
