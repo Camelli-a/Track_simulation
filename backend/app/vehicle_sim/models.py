@@ -49,6 +49,9 @@ class TrainState:
     ato_brake_bias_adaptation_enabled: bool = False
     last_brake_bias_adjustment: Optional[dict] = None
     brake_bias_history_size: int = 0
+    curve_output_enabled: bool = True
+    curve_history_size: int = 300
+    curve_point: Optional[dict] = None
 
     @property
     def speed_kmh(self) -> float:
@@ -116,6 +119,9 @@ class TrainState:
             ),
             "last_brake_bias_adjustment": self.last_brake_bias_adjustment,
             "brake_bias_history_size": self.brake_bias_history_size,
+            "curve_output_enabled": self.curve_output_enabled,
+            "curve_history_size": self.curve_history_size,
+            "curve_point": self.curve_point,
         }
 
 
