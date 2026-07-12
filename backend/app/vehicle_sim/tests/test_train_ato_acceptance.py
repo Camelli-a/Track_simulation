@@ -210,3 +210,81 @@ def test_train_state_protocol_contains_minimum_ato_fields():
         "stop_result",
     ]:
         assert field in state
+
+
+def test_multi_train_ato_instances_are_isolated():
+    manager = TrainManager()
+    train_am = manager.get_train("TRAIN-001")
+    train_sm = manager.get_train("TRAIN-002")
+
+    train_am.state.position = 1488.0
+    train_am.state.speed_ms = 8.0
+    train_am.driving_mode = "AM"
+    train_am.cached_traction_level = 4
+    train_am.cached_brake_level = 0
+    train_am.next_stop_target_m = 1500.0
+    _apply_ma(
+        train_am,
+        ma_limit=1600.0,
+        allowed_speed=80.0,
+        target_distance=200.0,
+    )
+
+    train_sm.state.position = 1199.8
+    train_sm.state.speed_ms = 0.0
+    train_sm.next_stop_target_m = 1200.0
+    _apply_ma(
+        train_sm,
+        ma_limit=1500.0,
+        allowed_speed=45.0,
+        target_distance=300.0,
+    )
+    train_sm.step_manual(
+        DriverInput(
+            vehicle_id=train_sm.state.vehicle_id,
+            line_id=train_sm.state.line_id,
+            source="test",
+            control_mode="manual",
+            traction_level=0,
+            brake_level=1,
+            direction="forward",
+            emergency_button=False,
+        ),
+        dt=0.1,
+    )
+
+    states = []
+    for _ in range(3):
+        states = manager.step_all(0.1)
+
+    state_by_vehicle_id = {state["vehicle_id"]: state for state in states}
+    state_am = state_by_vehicle_id["TRAIN-001"]
+    state_sm = state_by_vehicle_id["TRAIN-002"]
+
+    assert train_am.last_ato_output is not None
+    assert train_sm.last_ato_output is not None
+    assert train_am.last_ato_output is not train_sm.last_ato_output
+
+    assert train_am.driving_mode == "AM"
+    assert train_am.control_source in {"ato", "degraded", "emergency"}
+    assert train_am.commanded_traction_level == train_am.last_ato_output.commanded_traction_level
+    assert train_am.commanded_brake_level == train_am.last_ato_output.commanded_brake_level
+    assert train_am.commanded_traction_level != train_am.cached_traction_level
+
+    assert train_sm.driving_mode == "SM"
+    assert train_sm.control_source == "manual"
+    assert train_sm.commanded_traction_level == train_sm.cached_traction_level
+    assert train_sm.commanded_brake_level == train_sm.cached_brake_level
+    assert train_sm.commanded_brake_level == 1
+
+    assert state_am["vehicle_id"] == "TRAIN-001"
+    assert state_sm["vehicle_id"] == "TRAIN-002"
+    assert state_am["driving_mode"] == "AM"
+    assert state_sm["driving_mode"] == "SM"
+    assert state_am["control_source"] == train_am.control_source
+    assert state_sm["control_source"] == "manual"
+    assert state_am["stop_target"] == 1500.0
+    assert state_sm["stop_target"] == 1200.0
+    assert state_sm["stop_result"] is not None
+    assert state_sm["stop_result"]["vehicle_id"] == "TRAIN-002"
+    assert train_am.state.stop_result != train_sm.state.stop_result
