@@ -28,6 +28,9 @@ def test_train_state_protocol_contains_visualization_base_fields():
     assert protocol["position_m"] == 1234.5
     assert protocol["speed_mps"] == 16.67
     assert protocol["direction"] == 1
+    assert protocol["position_reference"] == "front_cab"
+    assert protocol["front_position_m"] == 1234.5
+    assert protocol["rear_position_m"] == 1116.5
 
 
 @pytest.mark.parametrize(
@@ -47,6 +50,16 @@ def test_train_state_protocol_direction_is_normalized(direction_code, expected_d
     assert protocol["direction"] == expected_direction
     assert protocol["direction"] in {1, -1}
     assert protocol["direction"] not in {0x55, 0xAA}
+
+
+def test_train_state_protocol_rear_position_follows_visual_direction():
+    forward = _state(position=1234.5, direction_code=1).to_protocol()
+    reverse = _state(position=1234.5, direction_code=-1).to_protocol()
+
+    assert forward["front_position_m"] == 1234.5
+    assert forward["rear_position_m"] == 1116.5
+    assert reverse["front_position_m"] == 1234.5
+    assert reverse["rear_position_m"] == 1352.5
 
 
 def test_train_state_protocol_speed_aliases_are_consistent():

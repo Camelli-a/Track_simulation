@@ -82,6 +82,25 @@ class TrainState:
             return -1
         return 1
 
+    @property
+    def front_position_m(self) -> float:
+        """Absolute mileage of the train front reference point in metres.
+
+        ``position``/``position_m`` is the canonical visualisation and signalling
+        reference point.  It represents the leading/front cab position on the
+        one-dimensional line model.
+        """
+        return self.position
+
+    @property
+    def rear_position_m(self) -> float:
+        """Absolute mileage of the rear end in metres.
+
+        Direction is normalised to the visualisation contract: ``1`` means
+        increasing mileage, ``-1`` means decreasing mileage.
+        """
+        return self.front_position_m - self.protocol_direction * TRAIN_LENGTH_M
+
     def to_protocol(self) -> dict:
         """Convert internal state to the train_state protocol message."""
         return {
@@ -96,6 +115,9 @@ class TrainState:
             "speed_ms": round(self.speed_ms, 3),
             "acceleration": round(self.acceleration, 3),
             "position_m": round(self.position, 3),
+            "position_reference": "front_cab",
+            "front_position_m": round(self.front_position_m, 3),
+            "rear_position_m": round(self.rear_position_m, 3),
             "speed_mps": round(self.speed_ms, 3),
             "speed_kmh": round(self.speed_kmh, 3),
             "vehicle_speed_kmh": round(self.speed_kmh, 3),
