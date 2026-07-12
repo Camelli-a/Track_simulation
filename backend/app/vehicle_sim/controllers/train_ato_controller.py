@@ -23,6 +23,11 @@ class AtoControlInput:
     acceleration_ms2: float = 0.0
     control_delay_sec: float = 0.0
     delay_compensation_enabled: bool = False
+    gradient_permille: float = 0.0
+    gradient_compensation_enabled: bool = False
+    previous_commanded_traction_level: int = 0
+    previous_commanded_brake_level: int = 0
+    jerk_limit_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,26 @@ class TrainAtoController:
     SPEED_DEADBAND_KMH = 1.0
     DEFAULT_CONTROL_DELAY_SEC = 0.3
     MAX_CONTROL_DELAY_SEC = 1.0
+    GRAVITY_MS2 = 9.81
+    MAX_GRADIENT_PERMILLE = 60.0
+    MIN_EFFECTIVE_DECEL_MS2 = 0.25
+    MAX_EFFECTIVE_DECEL_MS2 = 1.1
+    MAX_BRAKE_STEP_UP_PER_TICK = 1
+    MAX_BRAKE_STEP_DOWN_PER_TICK = 1
+    MAX_TRACTION_STEP_UP_PER_TICK = 1
+    MAX_TRACTION_STEP_DOWN_PER_TICK = 1
+    JERK_BYPASS_REASONS = {
+        "missing_ma_limit",
+        "missing_allowed_speed",
+        "invalid_allowed_speed",
+        "ma_behind_train",
+        "permission_denied",
+        "signal_stop",
+        "comm_unhealthy",
+        "ma_timeout",
+        "negative_target_distance",
+        "predicted_ma_overrun",
+    }
 
     def clamp_level(self, level) -> int:
         return max(0, min(self.MAX_LEVEL, int(round(float(level)))))
@@ -101,6 +126,92 @@ class TrainAtoController:
         if brake_level > 0:
             traction_level = 0
         return traction_level, brake_level
+
+    def smooth_command_levels(
+        self,
+        target_traction_level: int,
+        target_brake_level: int,
+        previous_traction_level: int,
+        previous_brake_level: int,
+        enabled: bool,
+        bypass: bool = False,
+    ) -> tuple[int, int]:
+        target_traction_level, target_brake_level = self.resolve_exclusive_levels(
+            target_traction_level,
+            target_brake_level,
+        )
+        previous_traction_level, previous_brake_level = self.resolve_exclusive_levels(
+            previous_traction_level,
+            previous_brake_level,
+        )
+        if not enabled or bypass:
+            return target_traction_level, target_brake_level
+
+        if target_brake_level > 0:
+            brake_level = self._step_level_toward(
+                previous_brake_level,
+                target_brake_level,
+                self.MAX_BRAKE_STEP_UP_PER_TICK,
+                self.MAX_BRAKE_STEP_DOWN_PER_TICK,
+            )
+            return self.resolve_exclusive_levels(0, brake_level)
+
+        if target_traction_level > 0:
+            if previous_brake_level > 0:
+                brake_level = self._step_level_toward(
+                    previous_brake_level,
+                    0,
+                    self.MAX_BRAKE_STEP_UP_PER_TICK,
+                    self.MAX_BRAKE_STEP_DOWN_PER_TICK,
+                )
+                return self.resolve_exclusive_levels(0, brake_level)
+            traction_level = self._step_level_toward(
+                previous_traction_level,
+                target_traction_level,
+                self.MAX_TRACTION_STEP_UP_PER_TICK,
+                self.MAX_TRACTION_STEP_DOWN_PER_TICK,
+            )
+            return self.resolve_exclusive_levels(traction_level, 0)
+
+        brake_level = self._step_level_toward(
+            previous_brake_level,
+            0,
+            self.MAX_BRAKE_STEP_UP_PER_TICK,
+            self.MAX_BRAKE_STEP_DOWN_PER_TICK,
+        )
+        traction_level = 0
+        if brake_level == 0:
+            traction_level = self._step_level_toward(
+                previous_traction_level,
+                0,
+                self.MAX_TRACTION_STEP_UP_PER_TICK,
+                self.MAX_TRACTION_STEP_DOWN_PER_TICK,
+            )
+        return self.resolve_exclusive_levels(traction_level, brake_level)
+
+    def should_bypass_jerk_limit(
+        self,
+        *,
+        ato_state: str,
+        degraded: bool,
+        reason: str | None,
+        distance_to_stop_m: float | None,
+        distance_to_ma_m: float | None,
+        target_brake_level: int,
+        current_speed_kmh: float,
+        target_speed_kmh: float,
+    ) -> bool:
+        if ato_state == "holding" or degraded:
+            return True
+        if reason in self.JERK_BYPASS_REASONS:
+            return True
+        if distance_to_stop_m is not None and distance_to_stop_m < 0.0:
+            return True
+        if distance_to_ma_m is not None and distance_to_ma_m <= self.HOLD_DISTANCE_M:
+            return True
+        return target_brake_level == self.MAX_LEVEL and (
+            current_speed_kmh - target_speed_kmh
+        ) > 25.0
 
     def is_finite_number(self, value) -> bool:
         if value is None:
@@ -159,6 +270,30 @@ class TrainAtoController:
             predicted_speed_ms = speed_ms
         return predicted_position_m, predicted_speed_ms
 
+    def compute_gradient_adjusted_decel(
+        self,
+        base_decel_ms2: float,
+        gradient_permille: float,
+        enabled: bool,
+    ) -> float:
+        base_decel_ms2 = self._finite_or_default(
+            base_decel_ms2, self.COMFORT_DECEL_MS2
+        )
+        if not enabled:
+            return base_decel_ms2
+
+        gradient_permille = self._finite_or_default(gradient_permille, 0.0)
+        gradient_permille = max(
+            -self.MAX_GRADIENT_PERMILLE,
+            min(self.MAX_GRADIENT_PERMILLE, gradient_permille),
+        )
+        gradient_acc_ms2 = self.GRAVITY_MS2 * gradient_permille / 1000.0
+        effective_decel_ms2 = base_decel_ms2 + gradient_acc_ms2
+        return max(
+            self.MIN_EFFECTIVE_DECEL_MS2,
+            min(self.MAX_EFFECTIVE_DECEL_MS2, effective_decel_ms2),
+        )
+
     def compute_control(self, control_input: AtoControlInput) -> AtoControlOutput:
         driving_mode = str(control_input.driving_mode).upper()
         if driving_mode == "AM":
@@ -187,6 +322,11 @@ class TrainAtoController:
         ma_context = self._ma_context(control_input_for_decision)
         distance_to_ma_m = ma_context["distance_to_ma_m"]
         safe_speed_limit_kmh = float(control_input.allowed_speed_kmh)
+        effective_decel_ms2 = self.compute_gradient_adjusted_decel(
+            base_decel_ms2=self.COMFORT_DECEL_MS2,
+            gradient_permille=control_input.gradient_permille,
+            enabled=control_input.gradient_compensation_enabled,
+        )
         stop_target_m = control_input.stop_target_m
         actual_distance_to_stop_m = self._distance_to_stop(control_input)
         predicted_distance_to_stop_m = self._distance_to_stop(control_input_for_decision)
@@ -239,7 +379,9 @@ class TrainAtoController:
             )
 
         target_speed_kmh = self._curve_target_speed_kmh(
-            effective_distance_m, safe_speed_limit_kmh
+            effective_distance_m,
+            safe_speed_limit_kmh,
+            effective_decel_ms2,
         )
         target_speed_ms = self.kmh_to_ms(target_speed_kmh)
         ato_state = "approaching"
@@ -289,14 +431,34 @@ class TrainAtoController:
         elif distance_to_stop_m is not None and distance_to_stop_m < 0.0:
             reason = "stop_target_behind_train"
 
+        current_speed_kmh = self.ms_to_kmh(control_speed_ms)
+        bypass_jerk_limit = self.should_bypass_jerk_limit(
+            ato_state=ato_state,
+            degraded=False,
+            reason=reason,
+            distance_to_stop_m=distance_to_stop_m,
+            distance_to_ma_m=distance_to_ma_m,
+            target_brake_level=brake_level,
+            current_speed_kmh=current_speed_kmh,
+            target_speed_kmh=target_speed_kmh,
+        )
+        commanded_traction_level, commanded_brake_level = self.smooth_command_levels(
+            target_traction_level=traction_level,
+            target_brake_level=brake_level,
+            previous_traction_level=control_input.previous_commanded_traction_level,
+            previous_brake_level=control_input.previous_commanded_brake_level,
+            enabled=control_input.jerk_limit_enabled,
+            bypass=bypass_jerk_limit,
+        )
+
         return self._build_output(
             vehicle_id=control_input.vehicle_id,
             driving_mode="AM",
             ato_state=ato_state,
             ato_traction_level=traction_level,
             ato_brake_level=brake_level,
-            commanded_traction_level=traction_level,
-            commanded_brake_level=brake_level,
+            commanded_traction_level=commanded_traction_level,
+            commanded_brake_level=commanded_brake_level,
             control_source="ato",
             recommended_speed_kmh=round(target_speed_kmh, 3),
             ato_target_speed_kmh=round(target_speed_kmh, 3),
@@ -334,10 +496,17 @@ class TrainAtoController:
         distance_to_stop_m = self._distance_to_stop(control_input_for_decision)
         recommended_speed_kmh = safe_speed_limit_kmh
         ato_state = "manual_recommend"
+        effective_decel_ms2 = self.compute_gradient_adjusted_decel(
+            base_decel_ms2=self.COMFORT_DECEL_MS2,
+            gradient_permille=control_input.gradient_permille,
+            enabled=control_input.gradient_compensation_enabled,
+        )
 
         if distance_to_stop_m is not None and distance_to_stop_m >= 0.0:
             recommended_speed_kmh = self._curve_target_speed_kmh(
-                distance_to_stop_m, safe_speed_limit_kmh
+                distance_to_stop_m,
+                safe_speed_limit_kmh,
+                effective_decel_ms2,
             )
             if distance_to_stop_m <= self.POSITION_CONTROL_DISTANCE_M:
                 low_speed_target_ms = self.compute_low_speed_target_ms(distance_to_stop_m)
@@ -452,10 +621,39 @@ class TrainAtoController:
             speed_ms=float(speed_ms),
         )
 
-    def _curve_target_speed_kmh(self, distance_m: float, safe_speed_limit_kmh: float) -> float:
-        decel = max(self.MIN_DECEL_MS2, min(self.COMFORT_DECEL_MS2, self.MAX_DECEL_MS2))
+    def _curve_target_speed_kmh(
+        self,
+        distance_m: float,
+        safe_speed_limit_kmh: float,
+        deceleration_ms2: float | None = None,
+    ) -> float:
+        if deceleration_ms2 is None:
+            decel = max(
+                self.MIN_DECEL_MS2,
+                min(self.COMFORT_DECEL_MS2, self.MAX_DECEL_MS2),
+            )
+        else:
+            decel = max(
+                0.001,
+                self._finite_or_default(deceleration_ms2, self.COMFORT_DECEL_MS2),
+            )
         target_speed_ms = math.sqrt(max(0.0, 2.0 * decel * max(0.0, distance_m)))
         return max(0.0, min(target_speed_ms * 3.6, float(safe_speed_limit_kmh)))
+
+    def _step_level_toward(
+        self,
+        current_level: int,
+        target_level: int,
+        step_up: int,
+        step_down: int,
+    ) -> int:
+        current_level = self.clamp_level(current_level)
+        target_level = self.clamp_level(target_level)
+        if target_level > current_level:
+            return min(target_level, current_level + max(0, int(step_up)))
+        if target_level < current_level:
+            return max(target_level, current_level - max(0, int(step_down)))
+        return current_level
 
     def _levels_for_speed_error(
         self,

@@ -143,6 +143,62 @@ def test_step_tick_passes_acceleration_and_delay_to_ato_controller():
     assert train.ato_delay_compensation_enabled is True
 
 
+def test_step_tick_uses_track_gradient_when_available():
+    flat_manager = TrainManager()
+    flat_train = flat_manager.get_train("TRAIN-001")
+    flat_train.state.position = 600.0
+    flat_train.state.speed_ms = 5.0
+    flat_train.driving_mode = "AM"
+    flat_train.next_stop_target_m = 900.0
+    flat_train.ato_gradient_compensation_enabled = False
+    _apply_valid_ma(flat_train, ma_limit=1200.0, allowed_speed=120.0, distance=600.0)
+
+    graded_manager = TrainManager()
+    graded_train = graded_manager.get_train("TRAIN-001")
+    graded_train.state.position = 600.0
+    graded_train.state.speed_ms = 5.0
+    graded_train.driving_mode = "AM"
+    graded_train.next_stop_target_m = 900.0
+    graded_train.ato_gradient_compensation_enabled = True
+    _apply_valid_ma(graded_train, ma_limit=1200.0, allowed_speed=120.0, distance=600.0)
+
+    flat_train.step_tick(0.1)
+    graded_train.step_tick(0.1)
+
+    assert graded_train.last_ato_output is not None
+    assert graded_train.ato_gradient_compensation_enabled is True
+    assert (
+        graded_train.last_ato_output.ato_target_speed_kmh
+        >= flat_train.last_ato_output.ato_target_speed_kmh - 0.001
+    )
+
+
+def test_step_tick_passes_previous_commanded_levels_for_jerk_limit():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    train.state.position = 1488.0
+    train.state.speed_ms = 8.0
+    train.driving_mode = "AM"
+    train.next_stop_target_m = 1500.0
+    train.ato_jerk_limit_enabled = True
+    train.commanded_traction_level = 0
+    train.commanded_brake_level = 0
+    _apply_valid_ma(train, ma_limit=1600.0, allowed_speed=80.0, distance=200.0)
+
+    train.step_tick(0.1)
+    first_brake_level = train.commanded_brake_level
+
+    assert train.last_ato_output is not None
+    assert train.last_ato_output.ato_brake_level == 4
+    assert first_brake_level == 1
+    assert train.applied_brake_level == first_brake_level
+
+    train.step_tick(0.1)
+
+    assert train.commanded_brake_level >= first_brake_level
+    assert train.commanded_brake_level <= first_brake_level + 1
+
+
 def test_train_state_protocol_contains_ato_fields():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")

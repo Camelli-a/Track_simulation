@@ -60,6 +60,8 @@ class Train:
         self.last_ato_output = None
         self.ato_control_delay_sec = TrainAtoController.DEFAULT_CONTROL_DELAY_SEC
         self.ato_delay_compensation_enabled = True
+        self.ato_gradient_compensation_enabled = True
+        self.ato_jerk_limit_enabled = True
         self.current_traction_level = 0
         self.current_brake_level = 0
         self.cached_traction_level = 0
@@ -206,6 +208,7 @@ class Train:
         ma_age_sec = None
         if self.last_ma_updated_at is not None:
             ma_age_sec = time.time() - self.last_ma_updated_at
+        gradient_permille = self._resolve_gradient_permille()
 
         ato_input = AtoControlInput(
             vehicle_id=self.state.vehicle_id,
@@ -227,6 +230,11 @@ class Train:
             acceleration_ms2=self.state.acceleration,
             control_delay_sec=self.ato_control_delay_sec,
             delay_compensation_enabled=self.ato_delay_compensation_enabled,
+            gradient_permille=gradient_permille,
+            gradient_compensation_enabled=self.ato_gradient_compensation_enabled,
+            previous_commanded_traction_level=self.commanded_traction_level,
+            previous_commanded_brake_level=self.commanded_brake_level,
+            jerk_limit_enabled=self.ato_jerk_limit_enabled,
         )
         ato_output = self.train_ato_controller.compute_control(ato_input)
         self.last_ato_output = ato_output
@@ -388,6 +396,14 @@ class Train:
         if hasattr(self.track, "get_stop_position"):
             return self.track.get_stop_position(self.state.position)
         return None
+
+    def _resolve_gradient_permille(self) -> float:
+        if hasattr(self.track, "get_gradient"):
+            try:
+                return float(self.track.get_gradient(self.state.position))
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
 
     def _maybe_generate_stop_result(self):
         if self.stop_target != self.last_stop_result_target_m:

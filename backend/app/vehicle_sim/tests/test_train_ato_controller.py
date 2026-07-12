@@ -43,6 +43,67 @@ def test_resolve_exclusive_levels_uses_brake_priority():
     assert controller.resolve_exclusive_levels(2, 0) == (2, 0)
 
 
+def test_smooth_command_levels_brake_steps_up_gradually():
+    controller = _controller()
+
+    traction, brake = controller.smooth_command_levels(
+        target_traction_level=0,
+        target_brake_level=4,
+        previous_traction_level=0,
+        previous_brake_level=0,
+        enabled=True,
+    )
+
+    assert traction == 0
+    assert brake == 1
+
+
+def test_smooth_command_levels_keeps_brake_priority():
+    controller = _controller()
+
+    traction, brake = controller.smooth_command_levels(
+        target_traction_level=2,
+        target_brake_level=3,
+        previous_traction_level=2,
+        previous_brake_level=0,
+        enabled=True,
+    )
+
+    assert traction == 0
+    assert 1 <= brake <= 3
+
+
+def test_smooth_command_levels_releases_brake_before_traction():
+    controller = _controller()
+
+    traction, brake = controller.smooth_command_levels(
+        target_traction_level=2,
+        target_brake_level=0,
+        previous_traction_level=0,
+        previous_brake_level=3,
+        enabled=True,
+    )
+
+    assert traction == 0
+    assert brake == 2
+
+
+def test_smooth_command_levels_bypass_outputs_target_immediately():
+    controller = _controller()
+
+    traction, brake = controller.smooth_command_levels(
+        target_traction_level=0,
+        target_brake_level=4,
+        previous_traction_level=0,
+        previous_brake_level=0,
+        enabled=True,
+        bypass=True,
+    )
+
+    assert traction == 0
+    assert brake == 4
+
+
 def test_am_normal_cruise_outputs_safe_levels():
     controller = _controller()
 
@@ -150,6 +211,26 @@ def test_compute_predicted_state_disabled_or_zero_delay_returns_actual_state():
     ) == (1000.0, 10.0)
 
 
+def test_gradient_adjusted_deceleration_helper():
+    controller = _controller()
+    base = controller.COMFORT_DECEL_MS2
+
+    assert controller.compute_gradient_adjusted_decel(base, 30.0, enabled=False) == base
+    assert controller.compute_gradient_adjusted_decel(base, 0.0, enabled=True) == pytest.approx(base)
+    assert controller.compute_gradient_adjusted_decel(base, 30.0, enabled=True) > base
+    assert controller.compute_gradient_adjusted_decel(base, -30.0, enabled=True) < base
+    assert (
+        controller.compute_gradient_adjusted_decel(base, 999.0, enabled=True)
+        <= controller.MAX_EFFECTIVE_DECEL_MS2
+    )
+    assert (
+        controller.compute_gradient_adjusted_decel(base, -999.0, enabled=True)
+        >= controller.MIN_EFFECTIVE_DECEL_MS2
+    )
+    assert controller.compute_gradient_adjusted_decel(base, math.nan, enabled=True) == pytest.approx(base)
+    assert controller.compute_gradient_adjusted_decel(base, math.inf, enabled=True) == pytest.approx(base)
+
+
 def test_am_uses_low_speed_position_control_within_twelve_meters():
     controller = _controller()
 
@@ -199,6 +280,88 @@ def test_delay_compensation_makes_distance_and_target_speed_more_conservative():
     assert with_delay.commanded_traction_level <= without_delay.commanded_traction_level
 
 
+def test_downhill_gradient_makes_am_target_speed_more_conservative():
+    controller = _controller()
+
+    flat = controller.compute_am_command(
+        _am_input(
+            position_m=1400.0,
+            speed_ms=15.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            gradient_permille=0.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+    downhill = controller.compute_am_command(
+        _am_input(
+            position_m=1400.0,
+            speed_ms=15.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            gradient_permille=-30.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+
+    assert downhill.ato_target_speed_kmh <= flat.ato_target_speed_kmh
+    assert downhill.commanded_brake_level >= flat.commanded_brake_level
+    assert downhill.commanded_traction_level <= flat.commanded_traction_level
+
+
+def test_am_brake_command_is_smoothed_when_jerk_limit_enabled():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=1400.0,
+            speed_ms=15.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            previous_commanded_brake_level=0,
+            jerk_limit_enabled=True,
+        )
+    )
+
+    assert output.ato_brake_level == 4
+    assert output.commanded_brake_level <= output.ato_brake_level
+    assert output.commanded_brake_level <= 1
+    assert output.applied_brake_level == output.commanded_brake_level
+
+
+def test_uphill_gradient_does_not_make_am_target_speed_more_conservative():
+    controller = _controller()
+
+    flat = controller.compute_am_command(
+        _am_input(
+            position_m=1400.0,
+            speed_ms=15.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            gradient_permille=0.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+    uphill = controller.compute_am_command(
+        _am_input(
+            position_m=1400.0,
+            speed_ms=15.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            gradient_permille=30.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+
+    assert uphill.ato_target_speed_kmh >= flat.ato_target_speed_kmh
+    assert uphill.ato_target_speed_kmh <= 80.0
+
+
 def test_am_creeps_near_stop_target():
     controller = _controller()
 
@@ -238,6 +401,24 @@ def test_am_holds_inside_stop_window_at_low_speed():
     assert output.commanded_brake_level == 4
 
 
+def test_holding_bypasses_jerk_limit():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=1499.7,
+            speed_ms=0.1,
+            stop_target_m=1500.0,
+            previous_commanded_brake_level=0,
+            jerk_limit_enabled=True,
+        )
+    )
+
+    assert output.ato_state == "holding"
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level == 4
+
+
 def test_am_invalid_ma_degrades_without_traction():
     controller = _controller()
 
@@ -252,6 +433,22 @@ def test_am_invalid_ma_degrades_without_traction():
     assert output.control_source == "degraded"
     assert output.ato_target_speed_kmh == 0.0
     assert output.recommended_speed_kmh == 0.0
+
+
+def test_degraded_bypasses_jerk_limit():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            ma_limit_m=None,
+            previous_commanded_brake_level=0,
+            jerk_limit_enabled=True,
+        )
+    )
+
+    assert output.degraded is True
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level >= 2
 
 
 def test_am_uses_ma_boundary_when_stop_target_is_beyond_ma():
@@ -290,6 +487,29 @@ def test_sm_only_recommends_speed_without_control_takeover():
     assert output.control_source == "manual"
     assert output.recommended_speed_kmh <= 50.0
     assert "manual" in output.ato_state
+
+
+def test_sm_does_not_apply_ato_jerk_limit_to_commanded_levels():
+    controller = _controller()
+
+    output = controller.compute_control(
+        AtoControlInput(
+            vehicle_id="TRAIN-001",
+            position_m=1000.0,
+            speed_ms=10.0,
+            ma_limit_m=2000.0,
+            allowed_speed_kmh=50.0,
+            stop_target_m=1500.0,
+            driving_mode="SM",
+            previous_commanded_brake_level=4,
+            jerk_limit_enabled=True,
+        )
+    )
+
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level == 0
+    assert output.control_source == "manual"
+    assert output.recommended_speed_kmh >= 0.0
 
 
 def test_unknown_driving_mode_falls_back_without_traction_takeover():
@@ -471,6 +691,42 @@ def test_sm_recommended_speed_uses_delay_prediction():
     assert with_delay.commanded_traction_level == 0
     assert with_delay.commanded_brake_level == 0
     assert with_delay.control_source == "manual"
+
+
+def test_sm_recommended_speed_uses_downhill_gradient_compensation():
+    controller = _controller()
+
+    flat = controller.compute_control(
+        AtoControlInput(
+            vehicle_id="TRAIN-001",
+            position_m=1400.0,
+            speed_ms=15.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            stop_target_m=1500.0,
+            driving_mode="SM",
+            gradient_permille=0.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+    downhill = controller.compute_control(
+        AtoControlInput(
+            vehicle_id="TRAIN-001",
+            position_m=1400.0,
+            speed_ms=15.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            stop_target_m=1500.0,
+            driving_mode="SM",
+            gradient_permille=-30.0,
+            gradient_compensation_enabled=True,
+        )
+    )
+
+    assert downhill.recommended_speed_kmh <= flat.recommended_speed_kmh
+    assert downhill.commanded_traction_level == 0
+    assert downhill.commanded_brake_level == 0
+    assert downhill.control_source == "manual"
 
 
 def test_evaluate_stop_result_classifies_window_and_errors():
