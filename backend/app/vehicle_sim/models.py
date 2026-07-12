@@ -44,6 +44,8 @@ class TrainState:
     stop_target: Optional[float] = None
     distance_to_stop: Optional[float] = None
     stop_result: Optional[dict] = None
+    ato_brake_bias: float = 1.0
+    ato_brake_bias_enabled: bool = False
 
     @property
     def speed_kmh(self) -> float:
@@ -104,6 +106,8 @@ class TrainState:
                 None if self.distance_to_stop is None else round(self.distance_to_stop, 3)
             ),
             "stop_result": self.stop_result,
+            "ato_brake_bias": round(self.ato_brake_bias, 3),
+            "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
         }
 
 

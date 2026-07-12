@@ -231,6 +231,50 @@ def test_gradient_adjusted_deceleration_helper():
     assert controller.compute_gradient_adjusted_decel(base, math.inf, enabled=True) == pytest.approx(base)
 
 
+def test_normalize_brake_bias_disabled_returns_default():
+    controller = _controller()
+
+    assert controller.normalize_brake_bias(1.5, enabled=False) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("invalid_bias", [None, math.nan, math.inf])
+def test_normalize_brake_bias_invalid_values_fall_back_to_default(invalid_bias):
+    controller = _controller()
+
+    assert controller.normalize_brake_bias(invalid_bias, enabled=True) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("unsafe_bias", [-1.0, 0.0])
+def test_normalize_brake_bias_non_positive_values_stay_safe(unsafe_bias):
+    controller = _controller()
+
+    assert controller.normalize_brake_bias(unsafe_bias, enabled=True) > 0.0
+    assert controller.normalize_brake_bias(unsafe_bias, enabled=True) == pytest.approx(
+        controller.MIN_BRAKE_BIAS
+    )
+
+
+def test_normalize_brake_bias_clamps_to_safe_range():
+    controller = _controller()
+
+    assert controller.normalize_brake_bias(0.1, enabled=True) == pytest.approx(
+        controller.MIN_BRAKE_BIAS
+    )
+    assert controller.normalize_brake_bias(10.0, enabled=True) == pytest.approx(
+        controller.MAX_BRAKE_BIAS
+    )
+
+
+def test_apply_brake_bias_to_decel_adjusts_effective_deceleration():
+    controller = _controller()
+
+    weak_brake_decel = controller.apply_brake_bias_to_decel(0.8, 1.2)
+    strong_brake_decel = controller.apply_brake_bias_to_decel(0.8, 0.8)
+
+    assert weak_brake_decel < 0.8
+    assert strong_brake_decel > 0.8
+
+
 def test_am_uses_low_speed_position_control_within_twelve_meters():
     controller = _controller()
 
@@ -362,6 +406,65 @@ def test_uphill_gradient_does_not_make_am_target_speed_more_conservative():
     assert uphill.ato_target_speed_kmh <= 80.0
 
 
+def test_am_brake_bias_above_one_makes_target_speed_more_conservative():
+    controller = _controller()
+
+    baseline = controller.compute_am_command(
+        _am_input(
+            position_m=1420.0,
+            speed_ms=8.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            brake_bias=1.0,
+            brake_bias_enabled=True,
+        )
+    )
+    biased = controller.compute_am_command(
+        _am_input(
+            position_m=1420.0,
+            speed_ms=8.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            brake_bias=1.3,
+            brake_bias_enabled=True,
+        )
+    )
+
+    assert biased.ato_target_speed_kmh < baseline.ato_target_speed_kmh
+
+
+def test_am_brake_bias_below_one_does_not_make_target_speed_more_conservative():
+    controller = _controller()
+
+    baseline = controller.compute_am_command(
+        _am_input(
+            position_m=1420.0,
+            speed_ms=8.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            brake_bias=1.0,
+            brake_bias_enabled=True,
+        )
+    )
+    biased = controller.compute_am_command(
+        _am_input(
+            position_m=1420.0,
+            speed_ms=8.0,
+            stop_target_m=1500.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            brake_bias=0.8,
+            brake_bias_enabled=True,
+        )
+    )
+
+    assert biased.ato_target_speed_kmh >= baseline.ato_target_speed_kmh
+    assert biased.ato_target_speed_kmh <= 80.0
+
+
 def test_am_creeps_near_stop_target():
     controller = _controller()
 
@@ -419,6 +522,24 @@ def test_holding_bypasses_jerk_limit():
     assert output.commanded_brake_level == 4
 
 
+def test_holding_is_not_weakened_by_brake_bias():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=1499.7,
+            speed_ms=0.1,
+            stop_target_m=1500.0,
+            brake_bias=0.7,
+            brake_bias_enabled=True,
+        )
+    )
+
+    assert output.ato_state == "holding"
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level == 4
+
+
 def test_am_invalid_ma_degrades_without_traction():
     controller = _controller()
 
@@ -443,6 +564,22 @@ def test_degraded_bypasses_jerk_limit():
             ma_limit_m=None,
             previous_commanded_brake_level=0,
             jerk_limit_enabled=True,
+        )
+    )
+
+    assert output.degraded is True
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level >= 2
+
+
+def test_degraded_is_not_weakened_by_brake_bias():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            ma_limit_m=None,
+            brake_bias=0.7,
+            brake_bias_enabled=True,
         )
     )
 
@@ -727,6 +864,42 @@ def test_sm_recommended_speed_uses_downhill_gradient_compensation():
     assert downhill.commanded_traction_level == 0
     assert downhill.commanded_brake_level == 0
     assert downhill.control_source == "manual"
+
+
+def test_sm_recommended_speed_uses_brake_bias_without_control_takeover():
+    controller = _controller()
+
+    baseline = controller.compute_control(
+        AtoControlInput(
+            vehicle_id="TRAIN-001",
+            position_m=1420.0,
+            speed_ms=8.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            stop_target_m=1500.0,
+            driving_mode="SM",
+            brake_bias=1.0,
+            brake_bias_enabled=True,
+        )
+    )
+    biased = controller.compute_control(
+        AtoControlInput(
+            vehicle_id="TRAIN-001",
+            position_m=1420.0,
+            speed_ms=8.0,
+            ma_limit_m=1600.0,
+            allowed_speed_kmh=80.0,
+            stop_target_m=1500.0,
+            driving_mode="SM",
+            brake_bias=1.3,
+            brake_bias_enabled=True,
+        )
+    )
+
+    assert biased.recommended_speed_kmh < baseline.recommended_speed_kmh
+    assert biased.commanded_traction_level == 0
+    assert biased.commanded_brake_level == 0
+    assert biased.control_source == "manual"
 
 
 def test_evaluate_stop_result_classifies_window_and_errors():

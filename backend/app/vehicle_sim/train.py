@@ -62,6 +62,8 @@ class Train:
         self.ato_delay_compensation_enabled = True
         self.ato_gradient_compensation_enabled = True
         self.ato_jerk_limit_enabled = True
+        self.ato_brake_bias_enabled = True
+        self.ato_brake_bias = TrainAtoController.DEFAULT_BRAKE_BIAS
         self.current_traction_level = 0
         self.current_brake_level = 0
         self.cached_traction_level = 0
@@ -235,6 +237,8 @@ class Train:
             previous_commanded_traction_level=self.commanded_traction_level,
             previous_commanded_brake_level=self.commanded_brake_level,
             jerk_limit_enabled=self.ato_jerk_limit_enabled,
+            brake_bias=self.ato_brake_bias,
+            brake_bias_enabled=self.ato_brake_bias_enabled,
         )
         ato_output = self.train_ato_controller.compute_control(ato_input)
         self.last_ato_output = ato_output
@@ -461,6 +465,8 @@ class Train:
         self.state.stop_target = self.stop_target
         self.state.distance_to_stop = self.distance_to_stop
         self.state.stop_result = self._stop_result_to_dict()
+        self.state.ato_brake_bias = self.ato_brake_bias
+        self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
 
     def _update_track_position(self):
         edge_info = self.track.get_edge_info(self.state.position)

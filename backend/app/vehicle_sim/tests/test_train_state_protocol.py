@@ -75,6 +75,8 @@ def test_train_state_protocol_keeps_ato_control_fields():
         applied_brake_level=4,
         control_source="emergency",
         atp_intervened=True,
+        ato_brake_bias=1.3,
+        ato_brake_bias_enabled=True,
     ).to_protocol()
 
     for field in [
@@ -86,12 +88,16 @@ def test_train_state_protocol_keeps_ato_control_fields():
         "applied_brake_level",
         "control_source",
         "atp_intervened",
+        "ato_brake_bias",
+        "ato_brake_bias_enabled",
     ]:
         assert field in protocol
 
     assert protocol["applied_brake_level"] == 4
     assert protocol["control_source"] == "emergency"
     assert protocol["atp_intervened"] is True
+    assert protocol["ato_brake_bias"] == 1.3
+    assert protocol["ato_brake_bias_enabled"] is True
 
 
 def test_train_stop_result_protocol_contains_vehicle_and_unit_aliases():
@@ -131,5 +137,7 @@ def test_single_train_step_all_protocol_has_visualization_and_ato_fields():
         "line_id",
         "applied_traction_level",
         "applied_brake_level",
+        "ato_brake_bias",
+        "ato_brake_bias_enabled",
     ]:
         assert field in state

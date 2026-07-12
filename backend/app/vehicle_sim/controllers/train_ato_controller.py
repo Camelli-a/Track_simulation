@@ -28,6 +28,8 @@ class AtoControlInput:
     previous_commanded_traction_level: int = 0
     previous_commanded_brake_level: int = 0
     jerk_limit_enabled: bool = False
+    brake_bias: float = 1.0
+    brake_bias_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,9 @@ class TrainAtoController:
     MAX_GRADIENT_PERMILLE = 60.0
     MIN_EFFECTIVE_DECEL_MS2 = 0.25
     MAX_EFFECTIVE_DECEL_MS2 = 1.1
+    DEFAULT_BRAKE_BIAS = 1.0
+    MIN_BRAKE_BIAS = 0.7
+    MAX_BRAKE_BIAS = 1.5
     MAX_BRAKE_STEP_UP_PER_TICK = 1
     MAX_BRAKE_STEP_DOWN_PER_TICK = 1
     MAX_TRACTION_STEP_UP_PER_TICK = 1
@@ -294,6 +299,29 @@ class TrainAtoController:
             min(self.MAX_EFFECTIVE_DECEL_MS2, effective_decel_ms2),
         )
 
+    def normalize_brake_bias(self, brake_bias: float, enabled: bool) -> float:
+        if not enabled:
+            return self.DEFAULT_BRAKE_BIAS
+        if not self.is_finite_number(brake_bias):
+            return self.DEFAULT_BRAKE_BIAS
+        brake_bias = float(brake_bias)
+        return max(self.MIN_BRAKE_BIAS, min(self.MAX_BRAKE_BIAS, brake_bias))
+
+    def apply_brake_bias_to_decel(
+        self,
+        effective_decel_ms2: float,
+        brake_bias: float,
+    ) -> float:
+        effective_decel_ms2 = self._finite_or_default(
+            effective_decel_ms2, self.COMFORT_DECEL_MS2
+        )
+        brake_bias = self.normalize_brake_bias(brake_bias, enabled=True)
+        biased_decel_ms2 = effective_decel_ms2 / brake_bias
+        return max(
+            self.MIN_EFFECTIVE_DECEL_MS2,
+            min(self.MAX_EFFECTIVE_DECEL_MS2, biased_decel_ms2),
+        )
+
     def compute_control(self, control_input: AtoControlInput) -> AtoControlOutput:
         driving_mode = str(control_input.driving_mode).upper()
         if driving_mode == "AM":
@@ -326,6 +354,14 @@ class TrainAtoController:
             base_decel_ms2=self.COMFORT_DECEL_MS2,
             gradient_permille=control_input.gradient_permille,
             enabled=control_input.gradient_compensation_enabled,
+        )
+        brake_bias = self.normalize_brake_bias(
+            control_input.brake_bias,
+            control_input.brake_bias_enabled,
+        )
+        effective_decel_ms2 = self.apply_brake_bias_to_decel(
+            effective_decel_ms2,
+            brake_bias,
         )
         stop_target_m = control_input.stop_target_m
         actual_distance_to_stop_m = self._distance_to_stop(control_input)
@@ -500,6 +536,14 @@ class TrainAtoController:
             base_decel_ms2=self.COMFORT_DECEL_MS2,
             gradient_permille=control_input.gradient_permille,
             enabled=control_input.gradient_compensation_enabled,
+        )
+        brake_bias = self.normalize_brake_bias(
+            control_input.brake_bias,
+            control_input.brake_bias_enabled,
+        )
+        effective_decel_ms2 = self.apply_brake_bias_to_decel(
+            effective_decel_ms2,
+            brake_bias,
         )
 
         if distance_to_stop_m is not None and distance_to_stop_m >= 0.0:

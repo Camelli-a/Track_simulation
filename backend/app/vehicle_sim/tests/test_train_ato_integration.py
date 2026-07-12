@@ -33,6 +33,8 @@ def test_train_initializes_train_ato_controller_and_control_fields():
     assert train.applied_brake_level == 0
     assert train.control_source == "manual"
     assert train.atp_intervened is False
+    assert train.ato_brake_bias_enabled is True
+    assert train.ato_brake_bias == pytest.approx(1.0)
 
 
 def test_step_tick_am_uses_train_ato_controller_command():
@@ -197,6 +199,42 @@ def test_step_tick_passes_previous_commanded_levels_for_jerk_limit():
 
     assert train.commanded_brake_level >= first_brake_level
     assert train.commanded_brake_level <= first_brake_level + 1
+
+
+def test_step_tick_passes_brake_bias_to_train_ato_controller():
+    baseline_manager = TrainManager()
+    baseline_train = baseline_manager.get_train("TRAIN-001")
+    baseline_train.state.position = 1420.0
+    baseline_train.state.speed_ms = 5.0
+    baseline_train.driving_mode = "AM"
+    baseline_train.next_stop_target_m = 1500.0
+    baseline_train.ato_gradient_compensation_enabled = False
+    baseline_train.ato_brake_bias_enabled = True
+    baseline_train.ato_brake_bias = 1.0
+    _apply_valid_ma(baseline_train, ma_limit=1600.0, allowed_speed=80.0, distance=180.0)
+
+    biased_manager = TrainManager()
+    biased_train = biased_manager.get_train("TRAIN-001")
+    biased_train.state.position = 1420.0
+    biased_train.state.speed_ms = 5.0
+    biased_train.driving_mode = "AM"
+    biased_train.next_stop_target_m = 1500.0
+    biased_train.ato_gradient_compensation_enabled = False
+    biased_train.ato_brake_bias_enabled = True
+    biased_train.ato_brake_bias = 1.3
+    _apply_valid_ma(biased_train, ma_limit=1600.0, allowed_speed=80.0, distance=180.0)
+
+    baseline_train.step_tick(0.1)
+    biased_train.step_tick(0.1)
+
+    assert baseline_train.last_ato_output is not None
+    assert biased_train.last_ato_output is not None
+    assert (
+        biased_train.last_ato_output.ato_target_speed_kmh
+        < baseline_train.last_ato_output.ato_target_speed_kmh
+    )
+    assert biased_train.state.ato_brake_bias == pytest.approx(1.3)
+    assert biased_train.state.ato_brake_bias_enabled is True
 
 
 def test_train_state_protocol_contains_ato_fields():
