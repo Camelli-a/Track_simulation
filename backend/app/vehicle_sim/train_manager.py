@@ -1,19 +1,32 @@
 from .adapters.command_mapping import command_percent_to_levels
-from .adapters.id_mapping import UDP_TRAIN_SLOTS, index_to_vehicle_id
+from .adapters.id_mapping import UDP_TRAIN_SLOTS, index_to_vehicle_id, vehicle_id_to_index
+import os
+
+from .line_data_loader import build_track_map_from_line_layout
 from .mock_data import DEFAULT_TRACK
 from .models import DriverInput
 from .track_map import TrackMap
 from .train import Train
 
-DEFAULT_INITIAL_TRAINS = 10
+DEFAULT_INITIAL_TRAINS = 1
 
 
 class TrainManager:
-    def __init__(self, initial_count: int = DEFAULT_INITIAL_TRAINS):
-        self.track = TrackMap(DEFAULT_TRACK)
+    def __init__(
+        self,
+        initial_count: int | None = None,
+        *,
+        track: TrackMap | None = None,
+        line_layout_path: str | None = None,
+        initial_spacing_m: float = 300.0,
+    ):
+        self.track = track or self._load_default_track(line_layout_path)
         self.trains: dict[str, Train] = {}
         self.slot_to_vehicle_id: dict[int, str] = {}
         self.vehicle_id_to_slot: dict[str, int] = {}
+        self.initial_spacing_m = float(initial_spacing_m)
+        if initial_count is None:
+            initial_count = int(os.getenv("VEHICLE_INITIAL_COUNT", str(DEFAULT_INITIAL_TRAINS)))
         self.reset_trains(initial_count)
 
     def add_train(
@@ -24,7 +37,7 @@ class TrainManager:
         line_id: str = "LINE-1",
     ) -> dict:
         if slot is None:
-            slot = self._first_free_slot()
+            slot = self._slot_for_vehicle_id_or_first_free(vehicle_id)
         if slot < 1:
             return {"ok": False, "reason": "slot_out_of_range", "slot": slot}
         if slot in self.slot_to_vehicle_id:
@@ -179,11 +192,22 @@ class TrainManager:
                 return slot
             slot += 1
 
+    def _slot_for_vehicle_id_or_first_free(self, vehicle_id: str | None) -> int | None:
+        if vehicle_id:
+            try:
+                inferred = vehicle_id_to_index(vehicle_id)
+                if inferred not in self.slot_to_vehicle_id:
+                    return inferred
+            except ValueError:
+                pass
+        return self._first_free_slot()
+
     def _default_position_for_slot(self, slot: int) -> float:
-        if slot == 1:
-            return 0.0
-        if slot == 2:
-            return 300.0
-        if slot == 3:
-            return 700.0
-        return float((slot - 1) * 300.0)
+        return float((slot - 1) * self.initial_spacing_m)
+
+    @staticmethod
+    def _load_default_track(line_layout_path: str | None = None) -> TrackMap:
+        try:
+            return build_track_map_from_line_layout(line_layout_path)
+        except Exception:
+            return TrackMap(DEFAULT_TRACK)

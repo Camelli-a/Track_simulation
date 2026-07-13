@@ -23,9 +23,17 @@ def _manual(**overrides):
     return DriverInput(**values)
 
 
+def _first_stop_position(train):
+    return next(
+        section.stop_position
+        for section in train.track.sections
+        if section.stop_position is not None
+    )
+
+
 def test_stopped_at_stop_target_opens_holds_then_closes_doors():
     train, _ = _train_and_router()
-    train.state.position = 1500.0
+    train.state.position = _first_stop_position(train)
     train.door_dwell_sec = 2.0
 
     train.step_tick(0.5)
@@ -47,7 +55,7 @@ def test_stopped_at_stop_target_opens_holds_then_closes_doors():
 
 def test_automatic_door_does_not_open_while_train_is_moving():
     train, _ = _train_and_router()
-    train.state.position = 1500.0
+    train.state.position = _first_stop_position(train)
     train.state.speed_ms = 1.0
 
     train.step_tick(0.1)
@@ -115,7 +123,7 @@ def test_door_closed_light_input_is_readback_not_physical_state():
 
 def test_auto_door_mode_can_select_both_sides():
     train, _ = _train_and_router()
-    train.state.position = 1500.0
+    train.state.position = _first_stop_position(train)
     train.step_manual(_manual(door_mode="both"), 0.1)
     train.step_tick(0.1)
 
@@ -125,7 +133,7 @@ def test_auto_door_mode_can_select_both_sides():
 
 def test_train_state_protocol_exposes_physical_door_state():
     train, _ = _train_and_router()
-    train.state.position = 1500.0
+    train.state.position = _first_stop_position(train)
     train.step_tick(0.1)
 
     protocol = train.state.to_protocol()

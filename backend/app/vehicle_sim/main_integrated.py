@@ -3,6 +3,7 @@ import json
 import time
 
 from .adapters.id_mapping import vehicle_id_to_index
+from .line_data_loader import build_track_map_from_line_layout
 from .message_router import MessageRouter
 from .train_manager import TrainManager
 from .zmq_bus import ZmqPublisher, ZmqSubscriber
@@ -25,12 +26,16 @@ def main():
     parser.add_argument("--vehicle-id", default="TRAIN-001")
     parser.add_argument("--train-index", type=int, default=None)
     parser.add_argument("--initial-position", type=float, default=0.0)
+    parser.add_argument("--line-layout", default=None)
     args = parser.parse_args()
 
     vehicle_id = args.vehicle_id
     train_index = args.train_index or infer_train_index(vehicle_id)
 
-    manager = TrainManager(initial_count=0)
+    manager = TrainManager(
+        initial_count=0,
+        track=build_track_map_from_line_layout(args.line_layout),
+    )
     result = manager.add_train(
         vehicle_id=vehicle_id,
         slot=train_index,
@@ -52,6 +57,7 @@ def main():
     print(f"vehicle_id={vehicle_id}")
     print(f"train_index={train_index}")
     print(f"initial_position={args.initial_position}")
+    print(f"line_layout={args.line_layout or 'default'}")
 
     try:
         step_index = 0
