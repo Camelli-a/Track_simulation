@@ -6,6 +6,7 @@ from app.communication.message_bus import MessageBus
 
 DEFAULT_TOPICS = [
     "driver_input",
+    "driver_desk_binding",
     "ato_command",
     "ma_state",
     "speed_constraint",

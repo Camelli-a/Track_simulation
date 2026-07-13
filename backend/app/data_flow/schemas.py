@@ -91,6 +91,7 @@ class IntegrationStatus(BaseModel):
     integration_mode: IntegrationMode = "simulation"
     realtime_channel: RealtimeChannel = "websocket"
     driver_desk_connected: bool = False
+    active_driver_vehicle_id: Optional[str] = None
     external_connections: ExternalConnections = Field(default_factory=ExternalConnections)
     degraded: bool = False
     last_realtime_message_at: Optional[float] = None

@@ -65,6 +65,23 @@ class VehicleManagementResponse(BaseModel):
     trains: list[Dict[str, Any]]
 
 
+class DriverDeskBindingRequest(BaseModel):
+    vehicle_id: str = Field(default="TRAIN-001")
+
+
+class DriverDeskBindingResponse(BaseModel):
+    accepted: bool = True
+    published: bool
+    topic: Literal["driver_desk_binding"]
+    active_driver_vehicle_id: str
+    previous_vehicle_id: Optional[str] = None
+
+
+class DriverDeskBindingStatus(BaseModel):
+    driver_desk_connected: bool = False
+    active_driver_vehicle_id: Optional[str] = None
+
+
 class StationDemoRequest(BaseModel):
     station_id: Optional[str] = None
     station_name: Optional[str] = None

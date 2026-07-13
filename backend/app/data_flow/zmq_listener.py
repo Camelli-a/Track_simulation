@@ -166,6 +166,8 @@ class ZmqDashboardListener:
             vehicle_id = self._vehicle_id(data)
             if vehicle_id:
                 state_store.update_driver_input(vehicle_id, data)
+        elif message_type == "driver_desk_binding":
+            state_store.set_active_driver_vehicle(data.get("vehicle_id"))
         elif message_type == "ato_command":
             commands = data.get("commands")
             if isinstance(commands, list):
