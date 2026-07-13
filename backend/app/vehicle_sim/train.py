@@ -712,7 +712,7 @@ class Train:
         self.state.driving_mode = self.driving_mode
         self.state.control_source = self.control_source
         self.state.ato_state = self.ato_state
-        self.state.ato_target_speed_kmh = self.ato_target_speed_kmh
+        self.state.ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
         self.state.ato_traction_level = self.ato_traction_level
         self.state.ato_brake_level = self.ato_brake_level
         self.state.commanded_traction_level = self.commanded_traction_level
@@ -720,8 +720,8 @@ class Train:
         self.state.applied_traction_level = self.applied_traction_level
         self.state.applied_brake_level = self.applied_brake_level
         self.state.atp_intervened = self.atp_intervened
-        self.state.stop_target = self.stop_target_m
-        self.state.distance_to_stop = self.distance_to_stop_m
+        self.state.stop_target = getattr(self, "stop_target_m", getattr(self, "stop_target", None))
+        self.state.distance_to_stop = getattr(self, "distance_to_stop_m", getattr(self, "distance_to_stop", None))
         self.state.stop_result = self._stop_result_to_dict()
         self.state.ato_brake_bias = self.ato_brake_bias
         self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
@@ -731,7 +731,7 @@ class Train:
         self.state.ato_capable = self.ato_capable
         self.state.auto_reverse_cap = self.auto_reverse_capable
         self.state.auto_reverse_active = self.auto_reverse_active
-        self.state.recommended_speed_kmh = self.recommended_speed_kmh
+        self.state.recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
         self.state.recommended_speed = 0.0 if self.recommended_speed_kmh is None else self.recommended_speed_kmh
         self.state.parking_brake = self.parking_brake_applied
         self.state.external_speed_limit_kmh = self.external_speed_limit_kmh
@@ -1060,13 +1060,21 @@ class Train:
         if self.last_ato_output is not None:
             degraded = self.last_ato_output.degraded
 
-        recommended_speed_kmh = self.recommended_speed_kmh
+        recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
         if recommended_speed_kmh is None:
             recommended_speed_kmh = getattr(self, "recommended_speed", None)
 
-        ato_target_speed_kmh = self.ato_target_speed_kmh
-        if ato_target_speed_kmh is None:
-            ato_target_speed_kmh = getattr(self, "ato_target_speed", None)
+        legacy_ato_target_speed = getattr(self, "ato_target_speed", None)
+        ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
+        if (
+            ato_target_speed_kmh is None
+            or (
+                ato_target_speed_kmh == 0.0
+                and legacy_ato_target_speed is not None
+                and self.last_ato_output is None
+            )
+        ):
+            ato_target_speed_kmh = legacy_ato_target_speed
 
         return {
             "time_s": round(self.sim_time_s, 3),
@@ -1077,12 +1085,12 @@ class Train:
             "speed_mps": round(self.state.speed_ms, 3),
             "speed_kmh": round(self.state.speed_kmh, 3),
             "acceleration_mps2": round(self.state.acceleration, 3),
-           "recommended_speed_mps": (
-                None if recommended_speed_kmh is None else round(recommended_speed_kmh / 3.6, 3)
+            "recommended_speed_mps": (
+                None if recommended_speed_kmh is None else round(float(recommended_speed_kmh) / 3.6, 3)
             ),
             "recommended_speed_kmh": self._round_optional(recommended_speed_kmh),
             "ato_target_speed_mps": (
-                None if ato_target_speed_kmh is None else round(ato_target_speed_kmh / 3.6, 3)
+                None if ato_target_speed_kmh is None else round(float(ato_target_speed_kmh) / 3.6, 3)
             ),
             "ato_target_speed_kmh": self._round_optional(ato_target_speed_kmh),
             "allowed_speed_kmh": self._round_optional(self.allowed_speed_kmh),
@@ -1140,13 +1148,23 @@ class Train:
     def _sync_control_state_to_train_state(self):
         self.state.driving_mode = self.driving_mode
         self.state.ato_state = self.ato_state
-        recommended_speed_kmh = self.recommended_speed_kmh
+        recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
         if recommended_speed_kmh is None:
             recommended_speed_kmh = getattr(self, "recommended_speed", 0.0)
 
-        ato_target_speed_kmh = self.ato_target_speed_kmh
+        legacy_ato_target_speed = getattr(self, "ato_target_speed", None)
+        ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
+        if (
+            ato_target_speed_kmh is None
+            or (
+                ato_target_speed_kmh == 0.0
+                and legacy_ato_target_speed is not None
+                and self.last_ato_output is None
+            )
+        ):
+            ato_target_speed_kmh = legacy_ato_target_speed
         if ato_target_speed_kmh is None:
-            ato_target_speed_kmh = getattr(self, "ato_target_speed", 0.0)
+            ato_target_speed_kmh = 0.0
 
         self.state.recommended_speed = recommended_speed_kmh
         self.state.recommended_speed_kmh = recommended_speed_kmh
@@ -1160,8 +1178,8 @@ class Train:
         self.state.applied_brake_level = self.applied_brake_level
         self.state.control_source = self.control_source
         self.state.atp_intervened = self.atp_intervened
-        self.state.stop_target = self.stop_target
-        self.state.distance_to_stop = self.distance_to_stop
+        self.state.stop_target = getattr(self, "stop_target_m", getattr(self, "stop_target", None))
+        self.state.distance_to_stop = getattr(self, "distance_to_stop_m", getattr(self, "distance_to_stop", None))
         self.state.stop_result = self._stop_result_to_dict()
         self.state.ato_brake_bias = self.ato_brake_bias
         self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
