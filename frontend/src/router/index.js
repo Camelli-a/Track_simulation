@@ -7,6 +7,16 @@ const routes = [
     children: [
       { path: '', redirect: '/line' },
       {
+        path: 'vehicle-status',
+        component: () => import('@/views/VehicleStatusView.vue'),
+        meta: {
+          title: '车辆状况',
+          section: '车辆状况',
+          subtitle: '汇总列车实时运行状态，含速度曲线与前向预测；后续扩展更多车辆诊断视图。',
+          opsHint: '速度曲线按 1 秒轮询后端接口，预测曲线基于当前驾驶指令前向仿真，可按需切换显示。',
+        },
+      },
+      {
         path: 'line',
         component: () => import('@/views/OverviewView.vue'),
         meta: {

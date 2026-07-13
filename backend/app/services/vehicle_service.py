@@ -9,14 +9,31 @@ class VehicleService(BaseService):
     def get_status(self) -> VehicleStatus:
         if self.source == "mock":
             return self._mock_status()
-        elif self.source == "udp":
-            # TODO: 接入 UDP 数据源
-            raise NotImplementedError("UDP 数据源尚未实现")
-        elif self.source == "zmq":
-            # TODO: 接入 ZMQ 数据源
-            raise NotImplementedError("ZMQ 数据源尚未实现")
+        elif self.source in {"zmq", "udp"}:
+            return self._zmq_status()
         else:
             raise ValueError(f"未知数据源: {self.source}")
+
+    def _zmq_status(self) -> VehicleStatus:
+        """从 state_store 读取第一辆车的实时状态，无数据时降级 mock。"""
+        try:
+            from app.data_flow.state_store import state_store
+            snapshot = state_store.get_snapshot()
+            trains = snapshot.trains
+            if trains:
+                t = trains[0]
+                return VehicleStatus(
+                    timestamp=time.time(),
+                    vehicle_id=t.vehicle_id,
+                    position=t.position,
+                    speed=t.speed,
+                    acceleration=t.acceleration,
+                    line_id=t.line_id,
+                    is_running=t.is_running,
+                )
+        except Exception:
+            pass
+        return self._mock_status()
 
     def get_history(self, limit: int = 100):
         # TODO: 接入历史数据存储

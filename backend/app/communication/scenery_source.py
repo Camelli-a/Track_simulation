@@ -26,7 +26,7 @@
     RunState            int8        1           运行工况/头灯控制
     Accel               int8        1           加速度 0~64(百分比)，100对应1.1m/s²
     SectionDistance     int32       4           本车车头位置，mm，相对起点道岔
-    EdgeID              int16       2           本车车头边号（区段号）
+    EdgeID              int16       2           本车车头边号
     SectionDirection    int8        1           本车运行方向，+1=正，-1=反
     conTrain_num        int8        1           他车数量 L
     conSectionDistance  int32×128   512         他车距离，mm

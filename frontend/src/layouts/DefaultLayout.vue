@@ -49,6 +49,7 @@
       </div>
 
       <nav class="mt-6 space-y-3">
+        <NavItem to="/vehicle-status" label="车辆状况" icon="⊙" hint="速度曲线、运行状态与车辆诊断" />
         <NavItem to="/line" label="运行总览" icon="◫" hint="线路主视图、当前场景与受影响车辆" />
         <NavItem to="/cab" label="停车控制" icon="▣" hint="单车监督、制动曲线、ATO/ATP 与停车结果" />
         <NavItem to="/signal" label="信号与联锁" icon="⌘" hint="MA 约束摘要、前方约束链与联锁冲突" />
