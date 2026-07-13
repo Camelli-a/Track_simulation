@@ -221,10 +221,15 @@
             </text>
           </g>
 
-          <g v-for="vehicle in vehicleMarkers" :key="`vehicle-${vehicle.vehicle_id}`">
+          <g
+            v-for="vehicle in vehicleMarkers"
+            :key="`vehicle-${vehicle.vehicle_id}`"
+            class="yard-vehicle-marker"
+            :style="{ transform: `translate(${vehicle.x}px, ${vehicle.y}px)` }"
+          >
             <rect
-              :x="vehicle.x - 10"
-              :y="vehicle.y - 4.5"
+              x="-10"
+              y="-4.5"
               width="20"
               height="9"
               rx="1.5"
@@ -233,8 +238,8 @@
               stroke-width="0.8"
             />
             <text
-              :x="vehicle.x"
-              :y="vehicle.labelY"
+              x="0"
+              :y="vehicle.labelY - vehicle.y"
               fill="#f8fafc"
               font-size="5.8"
               font-weight="700"
@@ -258,6 +263,14 @@
 
   </section>
 </template>
+
+<style scoped>
+.yard-vehicle-marker,
+.yard-vehicle-marker rect,
+.yard-vehicle-marker text {
+  transition: transform 0.45s linear;
+}
+</style>
 
 <script setup>
 import { computed } from 'vue'

@@ -98,15 +98,33 @@ def test_step_tick_emergency_does_not_modify_driving_mode():
     train = manager.get_train("TRAIN-001")
     train.driving_mode = "AM"
     train.state.emergency_brake = True
+    train.emergency_source = "emergency_button"
     _apply_valid_ma(train)
 
     train.step_tick(0.1)
 
     assert train.driving_mode == "AM"
     assert train.state.mode == "emergency"
-    assert train.control_source == "emergency"
+    assert train.control_source == "emergency_button"
     assert train.applied_traction_level == 0
     assert train.applied_brake_level == 4
+
+
+def test_step_tick_am_releases_stopped_atp_emergency_when_ma_allows():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    train.driving_mode = "AM"
+    train.state.emergency_brake = True
+    train.emergency_source = "atp"
+    train.state.speed_ms = 0.0
+    train.next_stop_target_m = 1500.0
+    _apply_valid_ma(train)
+
+    train.step_tick(0.1)
+
+    assert train.state.emergency_brake is False
+    assert train.state.mode == "ato"
+    assert train.control_source in {"ato", "degraded"}
 
 
 def test_step_tick_records_applied_levels_after_atp_intervention():

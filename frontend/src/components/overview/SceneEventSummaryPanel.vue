@@ -3,9 +3,9 @@
     <div class="app-section-head">
       <div>
         <p class="app-section-kicker">Scene Events</p>
-        <h3 class="app-section-title">当前场景事件摘要</h3>
+        <h3 class="app-section-title">当前场景时间摘要</h3>
         <p class="app-section-copy">
-          这里根据当前场景的 `highlightEvents` 自动从最近事件时间线和告警里提炼关键信号；点车后优先看该车。
+          从后端事件时间线、实时告警、MA、信号、ATO、ATP 和车门状态中提取当前场景摘要。
         </p>
       </div>
       <span class="app-chip">{{ activeOverviewScene.scenario_id }}</span>
@@ -47,7 +47,7 @@
       v-else
       class="mt-4 rounded-[1.1rem] border border-dashed border-white/10 bg-black/10 px-4 py-8 text-center text-sm text-slate-500"
     >
-      当前场景还没有配置 `highlightEvents`。
+      当前后端快照还没有可展示的场景事件。
     </div>
   </section>
 </template>

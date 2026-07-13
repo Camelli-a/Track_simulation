@@ -15,11 +15,13 @@ class MessageRouter:
         default_dt: float = 0.1,
         physical_driver_vehicle_id: str = "TRAIN-001",
         owned_vehicle_id: str | None = None,
+        allow_legacy_fallback_ato: bool = False,
     ):
         self.train_manager = train_manager
         self.default_dt = default_dt
         self.physical_driver_vehicle_id = physical_driver_vehicle_id
         self.owned_vehicle_id = owned_vehicle_id
+        self.allow_legacy_fallback_ato = allow_legacy_fallback_ato
 
     def handle(self, message: dict):
         message = normalize_message(message)
@@ -44,7 +46,7 @@ class MessageRouter:
         elif msg_type == "fault_event":
             return self._handle_fault_event(message)
         elif msg_type == "enable_fallback_ato":
-            self._handle_enable_fallback_ato(message)
+            return self._handle_enable_fallback_ato(message)
         elif msg_type == "set_train_state":
             return self._handle_set_train_state(message)
         elif msg_type == "add_train":
@@ -169,6 +171,17 @@ class MessageRouter:
         return {"ok": True, "vehicle_id": vehicle_id}
 
     def _handle_ato_command(self, msg: dict):
+        # Ground signal may publish batch ato_command records for dashboard/OCC
+        # visibility. In the second-stage architecture, train control is
+        # vehicle-side: TrainAtoController consumes MA + stop target in AM mode.
+        # Do not let ground ATO suggestions overwrite onboard ATO commands.
+        if isinstance(msg.get("commands"), list):
+            return {
+                "ok": True,
+                "ignored": True,
+                "reason": "batch_ato_command_is_dashboard_only",
+            }
+
         vehicle_id = self._target_vehicle_id(msg)
         if vehicle_id is None:
             return
@@ -213,6 +226,9 @@ class MessageRouter:
             train = self.train_manager.get_train(vehicle_id)
             if train is None:
                 continue
+            reason = str(item.get("reason", "unknown"))
+            if getattr(train, "station_demo_ma_override", False) and not reason.startswith("station_demo"):
+                continue
 
             ma = MaLimit(
                 vehicle_id=vehicle_id,
@@ -222,7 +238,7 @@ class MessageRouter:
                 target_speed=self._optional_float(
                     item.get("target_speed", item.get("target_speed_kmh"))
                 ),
-                reason=item.get("reason", "unknown"),
+                reason=reason,
                 allowed_speed_kmh=self._optional_float(
                     item.get("allowed_speed_kmh", item.get("speed_limit"))
                 ),
@@ -360,13 +376,29 @@ class MessageRouter:
             train.track = track
 
     def _handle_enable_fallback_ato(self, msg: dict):
+        if not self.allow_legacy_fallback_ato:
+            return {
+                "ok": True,
+                "ignored": True,
+                "reason": "legacy_fallback_ato_disabled",
+            }
         vehicle_id = self._target_vehicle_id(msg)
         if vehicle_id is None:
             return
         train = self.train_manager.get_train(vehicle_id)
         if train is None:
             return
-        train.enable_fallback_ato(float(msg["target_position"]))
+        reason = str(msg.get("reason", ""))
+        if reason.startswith("station_demo"):
+            train.station_demo_ma_override = True
+        train.enable_fallback_ato(
+            float(msg["target_position"]),
+            target_speed_kmh=(
+                None
+                if msg.get("target_speed_kmh") is None
+                else float(msg["target_speed_kmh"])
+            ),
+        )
 
     def _handle_set_train_state(self, msg: dict):
         vehicle_id = self._target_vehicle_id(msg)
@@ -402,8 +434,44 @@ class MessageRouter:
             train.state.acceleration = float(msg["acceleration"])
         if "mode" in msg and not train.state.emergency_brake:
             train.state.mode = msg["mode"]
+        if "route_id" in msg and msg["route_id"]:
+            train.state.route_id = str(msg["route_id"])
+        for field in (
+            "station_id",
+            "station_name",
+            "station_yard_section_id",
+            "station_yard_track_id",
+            "station_yard_route_section_ids",
+        ):
+            if field in msg:
+                setattr(train.state, field, msg[field])
+        if "driving_mode" in msg:
+            driving_mode = str(msg["driving_mode"]).upper()
+            if driving_mode in {"AM", "SM"}:
+                train.driving_mode = driving_mode
+                train.control_source = "ato" if driving_mode == "AM" else "manual"
+                if driving_mode == "AM":
+                    train.cached_external_ato_command = None
+                    train.fallback_ato = None
+                    if not train.state.emergency_brake:
+                        train.state.mode = "ato"
+        if bool(msg.get("clear_stop_target", False)):
+            train.next_stop_target_m = None
+            train.stop_target_m = None
+            train.distance_to_stop_m = None
         if "direction_code" in msg:
             train.state.direction_code = int(msg["direction_code"])
+        stop_target_m = self._optional_float(
+            msg.get(
+                "stop_target_m",
+                msg.get("next_stop_target_m", msg.get("stop_target")),
+            )
+        )
+        if stop_target_m is not None:
+            train.set_next_stop_target_m(stop_target_m)
+            train.stop_target_m = stop_target_m
+            direction_sign = -1 if int(train.state.direction_code) < 0 else 1
+            train.distance_to_stop_m = (stop_target_m - train.state.position) * direction_sign
         train.state.is_running = train.state.speed_ms > 0.0
         return {
             "ok": True,

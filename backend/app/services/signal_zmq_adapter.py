@@ -44,6 +44,9 @@ class SignalZmqAdapter:
     def start(self):
         self.bus.start()
         self.bus.subscribe("train_state", self.on_train_state)
+        self.bus.subscribe("remove_train", self.on_remove_train)
+        self.bus.subscribe("clear_trains", self.on_clear_trains)
+        self.bus.subscribe("reset_trains", self.on_clear_trains)
         self.bus.subscribe("route_request", self.on_route_request)
         self.stop_event.clear()
         if self.publish_thread is None or not self.publish_thread.is_alive():
@@ -67,6 +70,7 @@ class SignalZmqAdapter:
             "position": data["position"],
             "speed": data["speed"],
             "route_id": data.get("route_id", "R_MAIN"),
+            "direction_code": data.get("direction_code", data.get("direction", 1)),
         }
         if "train_length" in data:
             train_state["train_length"] = data["train_length"]
@@ -86,6 +90,27 @@ class SignalZmqAdapter:
 
         if self.publish_on_update:
             self.publish_signal_outputs()
+
+    def on_remove_train(self, topic: str, data: dict):
+        vehicle_id = data.get("vehicle_id")
+        if not vehicle_id:
+            return
+        with self.lock:
+            self.train_states_by_id.pop(str(vehicle_id), None)
+            self.train_last_update_at.pop(str(vehicle_id), None)
+            self.active_alarm_keys.discard(f"train_state_timeout:{vehicle_id}")
+        if self.publish_on_update:
+            self.publish_signal_outputs()
+
+    def on_clear_trains(self, topic: str, data: dict):
+        with self.lock:
+            self.train_states_by_id.clear()
+            self.train_last_update_at.clear()
+            self.active_alarm_keys = {
+                key
+                for key in self.active_alarm_keys
+                if not key.startswith("train_state_timeout:")
+            }
 
     def on_route_request(self, topic: str, data: dict) -> None:
         request_type = str(data.get("request_type", "open")).strip().lower()

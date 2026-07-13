@@ -1688,26 +1688,144 @@ function isVehicleInStationRange(vehicle, range, stationId) {
 }
 
 function projectVehicleOnBackendYard(vehicle, edges) {
-  const sectionEdge = edges.find((edge) =>
-    Number.isFinite(edge.start)
-    && Number.isFinite(edge.end)
-    && vehicle.position != null
-    && vehicle.position >= edge.start
-    && vehicle.position <= edge.end,
-  )
+  const position = Number(vehicle.position)
+  if (!Number.isFinite(position)) return null
 
-  const trackEdge = !sectionEdge && vehicle.track_id
-    ? edges.find((edge) => String(edge.track_id) === String(vehicle.track_id))
+  const toleranceM = 2
+  const hintedSectionId = vehicle.station_yard_section_id != null
+    ? String(vehicle.station_yard_section_id)
+    : null
+  const hintedTrackId = vehicle.station_yard_track_id != null
+    ? String(vehicle.station_yard_track_id)
+    : null
+  const routeSectionIds = new Set(
+    Array.isArray(vehicle.station_yard_route_section_ids)
+      ? vehicle.station_yard_route_section_ids.map((id) => String(id))
+      : [],
+  )
+  if (String(vehicle.route_id ?? '').startsWith('DEMO-') && routeSectionIds.size === 0) {
+    return null
+  }
+  const projectionEdges = routeSectionIds.size
+    ? edges.filter((edge) => routeSectionIds.has(String(edge.section_id)))
+    : edges
+  if (routeSectionIds.size && projectionEdges.length === 0) {
+    return null
+  }
+
+  if (routeSectionIds.size) {
+    const routeProjection = projectVehicleOnContinuousRoute(position, projectionEdges, vehicle.station_yard_route_section_ids)
+    if (routeProjection) return routeProjection
+  }
+
+  const positionCandidates = projectionEdges
+    .filter((edge) =>
+      Number.isFinite(edge.start)
+      && Number.isFinite(edge.end)
+      && position >= Math.min(edge.start, edge.end) - toleranceM
+      && position <= Math.max(edge.start, edge.end) + toleranceM,
+    )
+    .sort((a, b) => vehicleProjectionRank(a, vehicle, hintedSectionId, hintedTrackId)
+      - vehicleProjectionRank(b, vehicle, hintedSectionId, hintedTrackId))
+
+  const hintedEdge = hintedSectionId
+    ? projectionEdges.find((edge) => String(edge.section_id) === hintedSectionId)
     : null
 
-  const edge = sectionEdge ?? trackEdge
+  const hintedTrackEdge = !hintedEdge && hintedTrackId
+    ? projectionEdges.find((edge) => String(edge.track_id) === hintedTrackId)
+    : null
+
+  const trackEdge = !hintedEdge && !hintedTrackEdge && vehicle.track_id
+    ? projectionEdges.find((edge) => String(edge.track_id) === String(vehicle.track_id))
+    : null
+
+  const edge = positionCandidates[0] ?? hintedEdge ?? hintedTrackEdge ?? trackEdge
   if (!edge) return null
 
   const ratio = Number.isFinite(edge.start) && Number.isFinite(edge.end) && edge.end !== edge.start
-    ? clamp((vehicle.position - edge.start) / (edge.end - edge.start), 0, 1)
+    ? clamp((position - edge.start) / (edge.end - edge.start), 0, 1)
     : 0.5
 
   return pointOnPolyline(edge.points, ratio)
+}
+
+function projectVehicleOnContinuousRoute(position, edges, routeSectionIds) {
+  const edgeById = new Map(edges.map((edge) => [String(edge.section_id), edge]))
+  const routeEdges = routeSectionIds
+    .map((id) => edgeById.get(String(id)))
+    .filter((edge) =>
+      edge
+      && Array.isArray(edge.points)
+      && edge.points.length >= 2
+      && Number.isFinite(edge.start)
+      && Number.isFinite(edge.end),
+    )
+
+  if (!routeEdges.length) return null
+
+  for (const edge of routeEdges) {
+    const start = Math.min(edge.start, edge.end)
+    const end = Math.max(edge.start, edge.end)
+    if (position >= start && position <= end) {
+      const ratio = edge.end !== edge.start
+        ? clamp((position - edge.start) / (edge.end - edge.start), 0, 1)
+        : 0.5
+      return pointOnPolyline(edge.points, ratio)
+    }
+  }
+
+  for (let index = 0; index < routeEdges.length - 1; index += 1) {
+    const current = routeEdges[index]
+    const next = routeEdges[index + 1]
+    const currentEnd = Math.max(current.start, current.end)
+    const nextStart = Math.min(next.start, next.end)
+    if (position > currentEnd && position < nextStart) {
+      const ratio = clamp((position - currentEnd) / Math.max(0.001, nextStart - currentEnd), 0, 1)
+      const from = routeEdgeMileageEndpoint(current, currentEnd)
+      const to = routeEdgeMileageEndpoint(next, nextStart)
+      return {
+        x: from.x + (to.x - from.x) * ratio,
+        y: from.y + (to.y - from.y) * ratio,
+      }
+    }
+  }
+
+  const first = routeEdges[0]
+  const last = routeEdges[routeEdges.length - 1]
+  if (position < Math.min(first.start, first.end)) {
+    return routeEdgeMileageEndpoint(first, Math.min(first.start, first.end))
+  }
+  const lastEnd = Math.max(last.start, last.end)
+  const lastEndPoint = routeEdgeMileageEndpoint(last, lastEnd)
+  const points = last.points ?? []
+  if (points.length >= 2 && position > lastEnd) {
+    const prev = points[points.length - 2]
+    const end = points[points.length - 1]
+    const dx = Number(end[0]) - Number(prev[0])
+    const dy = Number(end[1]) - Number(prev[1])
+    const length = Math.max(0.001, Math.hypot(dx, dy))
+    const extra = position - lastEnd
+    return {
+      x: lastEndPoint.x + (dx / length) * extra,
+      y: lastEndPoint.y + (dy / length) * extra,
+    }
+  }
+  return lastEndPoint
+}
+
+function routeEdgeMileageEndpoint(edge, mileage) {
+  const ratio = edge.end !== edge.start
+    ? clamp((mileage - edge.start) / (edge.end - edge.start), 0, 1)
+    : 0.5
+  return pointOnPolyline(edge.points, ratio)
+}
+
+function vehicleProjectionRank(edge, vehicle, hintedSectionId, hintedTrackId) {
+  if (hintedSectionId && String(edge.section_id) === hintedSectionId) return 0
+  if (hintedTrackId && String(edge.track_id) === hintedTrackId) return 1
+  if (vehicle.track_id != null && String(edge.track_id) === String(vehicle.track_id)) return 2
+  return 3
 }
 
 function resolveBackendViewBox({ edges, signals, turnouts, vehicles }) {

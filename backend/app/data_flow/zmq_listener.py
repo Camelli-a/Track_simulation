@@ -178,6 +178,31 @@ class ZmqDashboardListener:
                 vehicle_id = self._vehicle_id(data)
                 if vehicle_id:
                     state_store.update_ato_command(vehicle_id, data)
+        elif message_type == "ato_state":
+            vehicle_id = self._vehicle_id(data)
+            if vehicle_id:
+                state_store.update_train(vehicle_id, data)
+        elif message_type == "atp_state":
+            vehicle_id = self._vehicle_id(data)
+            if vehicle_id:
+                payload = dict(data)
+                if "intervened" in payload and "atp_intervention" not in payload:
+                    payload["atp_intervention"] = payload["intervened"]
+                state_store.update_train(vehicle_id, payload)
+        elif message_type == "door_state":
+            vehicle_id = self._vehicle_id(data)
+            if vehicle_id:
+                payload = dict(data)
+                if "doors_all_closed" in payload and "door_closed_light" not in payload:
+                    payload["door_closed_light"] = payload["doors_all_closed"]
+                if (
+                    ("left_door_open" in payload or "right_door_open" in payload)
+                    and "door_open_light" not in payload
+                ):
+                    payload["door_open_light"] = bool(payload.get("left_door_open")) or bool(
+                        payload.get("right_door_open")
+                    )
+                state_store.update_train(vehicle_id, payload)
         elif message_type == "signal_state":
             state_store.update_signal_state(data)
         elif message_type == "ma_state":

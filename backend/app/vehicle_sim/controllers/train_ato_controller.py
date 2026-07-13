@@ -372,23 +372,36 @@ class TrainAtoController:
             actual_distance_to_stop_m,
             predicted_distance_to_stop_m,
         )
+        direction_sign = self._direction_sign(control_input_for_decision.direction)
         if distance_to_ma_m is not None and distance_to_ma_m <= 0.0:
             return self._degraded_output(
                 control_input_for_decision,
                 "AM",
                 "predicted_ma_overrun",
             )
+        stop_target_within_ma = False
+        if (
+            stop_target_m is not None
+            and ma_context["effective_ma_limit_m"] is not None
+        ):
+            stop_target_within_ma = (
+                (ma_context["effective_ma_limit_m"] - float(stop_target_m))
+                * direction_sign
+            ) >= -1e-6
         stop_target_is_safe = (
             stop_target_m is not None
             and distance_to_stop_m is not None
             and distance_to_stop_m >= 0.0
-            and stop_target_m <= ma_context["effective_ma_limit_m"] + 1e-6
+            and stop_target_within_ma
         )
 
         effective_target_m = (
             stop_target_m if stop_target_is_safe else ma_context["effective_ma_limit_m"]
         )
-        effective_distance_m = max(0.0, effective_target_m - control_position_m)
+        effective_distance_m = max(
+            0.0,
+            (float(effective_target_m) - control_position_m) * direction_sign,
+        )
 
         if (
             stop_target_is_safe
@@ -418,7 +431,7 @@ class TrainAtoController:
 
         target_speed_kmh = self._curve_target_speed_kmh(
             effective_distance_m,
-            safe_speed_limit_kmh,
+            self._tracking_speed_limit_kmh(safe_speed_limit_kmh),
             effective_decel_ms2,
         )
         target_speed_ms = self.kmh_to_ms(target_speed_kmh)
@@ -458,13 +471,24 @@ class TrainAtoController:
         traction_level, brake_level = self.resolve_exclusive_levels(
             traction_level, brake_level
         )
+        traction_level, brake_level = self._apply_speed_limit_guard(
+            current_speed_kmh=self.ms_to_kmh(control_speed_ms),
+            safe_speed_limit_kmh=safe_speed_limit_kmh,
+            traction_level=traction_level,
+            brake_level=brake_level,
+        )
         if brake_level > 0 and ato_state != "creep":
             ato_state = "braking_to_stop"
 
         reason = "normal"
         if (
             control_input.stop_target_m is not None
-            and control_input.stop_target_m > ma_context["effective_ma_limit_m"]
+            and ma_context["effective_ma_limit_m"] is not None
+            and (
+                (ma_context["effective_ma_limit_m"] - float(control_input.stop_target_m))
+                * direction_sign
+            )
+            < -1e-6
         ):
             reason = "stop_target_beyond_ma"
         elif distance_to_stop_m is not None and distance_to_stop_m < 0.0:
@@ -618,6 +642,15 @@ class TrainAtoController:
         if float(control_input.allowed_speed_kmh) <= 0.0:
             return False, "invalid_allowed_speed"
         if float(control_input.ma_limit_m) <= float(control_input.position_m):
+            if self._is_reverse_direction(control_input.direction) and float(
+                control_input.ma_limit_m
+            ) < float(control_input.position_m):
+                pass
+            else:
+                return False, "ma_behind_train"
+        if self._is_reverse_direction(control_input.direction) and float(
+            control_input.ma_limit_m
+        ) >= float(control_input.position_m):
             return False, "ma_behind_train"
 
         if control_input.target_distance_m is not None:
@@ -717,11 +750,51 @@ class TrainAtoController:
         if speed_error_kmh > self.SPEED_DEADBAND_KMH:
             return 0, 1
 
-        if current_speed_kmh < target_speed_kmh - 3.0 and target_speed_kmh > 1.0:
-            traction_level = 2 if target_speed_kmh - current_speed_kmh > 10.0 else 1
+        underspeed_kmh = target_speed_kmh - current_speed_kmh
+        if underspeed_kmh > 3.0 and target_speed_kmh > 1.0:
+            if underspeed_kmh > 25.0:
+                traction_level = 4
+            elif underspeed_kmh > 15.0:
+                traction_level = 3
+            elif underspeed_kmh > 6.0:
+                traction_level = 2
+            else:
+                traction_level = 1
             return self.clamp_level(traction_level), 0
 
         return 0, 0
+
+    def _apply_speed_limit_guard(
+        self,
+        *,
+        current_speed_kmh: float,
+        safe_speed_limit_kmh: float,
+        traction_level: int,
+        brake_level: int,
+    ) -> tuple[int, int]:
+        """Prevent ATO from relying on ATP emergency braking for speed limits."""
+
+        if not self.is_finite_number(safe_speed_limit_kmh) or safe_speed_limit_kmh <= 0.0:
+            return self.resolve_exclusive_levels(0, max(brake_level, 2))
+        overspeed_kmh = current_speed_kmh - safe_speed_limit_kmh
+        if overspeed_kmh > 4.0:
+            return 0, 4
+        if overspeed_kmh > 2.0:
+            return 0, max(brake_level, 3)
+        if overspeed_kmh > 0.5:
+            return 0, max(brake_level, 2)
+        if overspeed_kmh > -1.0:
+            return 0, max(brake_level, 1)
+        if current_speed_kmh >= safe_speed_limit_kmh - 5.0:
+            return 0, brake_level
+        return self.resolve_exclusive_levels(traction_level, brake_level)
+
+    def _tracking_speed_limit_kmh(self, safe_speed_limit_kmh: float) -> float:
+        if not self.is_finite_number(safe_speed_limit_kmh):
+            return 0.0
+        safe_speed_limit_kmh = max(0.0, float(safe_speed_limit_kmh))
+        margin = min(5.0, safe_speed_limit_kmh * 0.2)
+        return max(0.0, safe_speed_limit_kmh - margin)
 
     def _levels_for_low_speed_error(
         self,
@@ -759,10 +832,12 @@ class TrainAtoController:
     def _ma_context(self, control_input: AtoControlInput) -> dict:
         distance_from_absolute_ma = None
         effective_ma_limit_m = None
+        direction_sign = self._direction_sign(control_input.direction)
         if control_input.ma_limit_m is not None:
             distance_from_absolute_ma = max(
                 0.0,
-                float(control_input.ma_limit_m) - float(control_input.position_m),
+                (float(control_input.ma_limit_m) - float(control_input.position_m))
+                * direction_sign,
             )
             effective_ma_limit_m = float(control_input.ma_limit_m)
 
@@ -772,7 +847,9 @@ class TrainAtoController:
                 distance_to_ma_m = target_distance_m
             else:
                 distance_to_ma_m = min(distance_from_absolute_ma, target_distance_m)
-            effective_ma_limit_m = float(control_input.position_m) + distance_to_ma_m
+            effective_ma_limit_m = (
+                float(control_input.position_m) + distance_to_ma_m * direction_sign
+            )
         else:
             distance_to_ma_m = distance_from_absolute_ma
 
@@ -784,7 +861,9 @@ class TrainAtoController:
     def _distance_to_stop(self, control_input: AtoControlInput) -> float | None:
         if control_input.stop_target_m is None:
             return None
-        return float(control_input.stop_target_m) - float(control_input.position_m)
+        return (
+            float(control_input.stop_target_m) - float(control_input.position_m)
+        ) * self._direction_sign(control_input.direction)
 
     def _finite_or_default(self, value, default: float) -> float:
         try:
@@ -799,11 +878,22 @@ class TrainAtoController:
 
     def _is_reverse_direction(self, direction) -> bool:
         if isinstance(direction, str):
-            return direction.strip().lower() in {"backward", "reverse", "-1"}
+            return direction.strip().lower() in {
+                "backward",
+                "reverse",
+                "down",
+                "-1",
+                "2",
+                "0xaa",
+                "aa",
+            }
         try:
-            return int(direction) == -1
+            return int(direction) in {-1, 2, 0xAA}
         except (TypeError, ValueError):
             return False
+
+    def _direction_sign(self, direction) -> int:
+        return -1 if self._is_reverse_direction(direction) else 1
 
     def _replace_control_state(
         self,

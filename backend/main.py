@@ -34,10 +34,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
+from app.communication.broker_manager import broker_process_manager
 from app.core.config import settings
 from app.data_flow.websocket import router as dashboard_ws_router
 from app.data_flow.zmq_listener import zmq_dashboard_listener
+from app.services.line_operation_service import line_operation_service
+from app.services.signal_zmq_adapter import SignalZmqAdapter
+from app.services.station_demo_service import station_demo_service
 from app.speed_curve.websocket_router import router as speed_curve_ws_router
+from app.vehicle_sim.process_manager import vehicle_process_manager
 
 logger = logging.getLogger(__name__)
 
@@ -51,28 +56,47 @@ async def lifespan(app: FastAPI):
     from app.speed_curve.zmq_listener import attach_to_zmq_listener
     attach_to_zmq_listener()
 
+    if settings.ENABLE_ZMQ_BROKER_MANAGER:
+        broker_process_manager.start()
+    if settings.ENABLE_ZMQ_DASHBOARD_LISTENER:
+        zmq_dashboard_listener.start()
+    signal_adapter = SignalZmqAdapter() if settings.ENABLE_SIGNAL_ZMQ_ADAPTER else None
+    if signal_adapter is not None:
+        signal_adapter.start()
+
+    async def _stop_common() -> None:
+        await line_operation_service.stop()
+        await station_demo_service.stop()
+        vehicle_process_manager.stop_all()
+        if signal_adapter is not None:
+            signal_adapter.stop()
+        if settings.ENABLE_ZMQ_DASHBOARD_LISTENER:
+            await zmq_dashboard_listener.stop()
+        if settings.ENABLE_ZMQ_BROKER_MANAGER:
+            broker_process_manager.stop()
+
     if settings.DATA_SOURCE != "zmq":
         # mock mode: nothing else to start
         logger.info("DATA_SOURCE=%s — simulation loop and PLC disabled", settings.DATA_SOURCE)
-        yield
+        try:
+            yield
+        finally:
+            await _stop_common()
         return
 
     # ══════════════════════════════════════════════════════════════════
-    # ZMQ mode: full pipeline
+    # ZMQ mode: full pipeline (physical PLC driver desk for TRAIN-001)
     # ══════════════════════════════════════════════════════════════════
 
-    # 1. ZMQ dashboard listener — receives external module messages
-    zmq_dashboard_listener.start()
-
-    # 2. Shared ZMQ bus — used by DriverDeskSource, SimulationLoop, etc.
+    # Shared ZMQ bus — used by DriverDeskSource, SimulationLoop, etc.
     from app.communication.message_bus import MessageBus
     bus = MessageBus()
     bus.start()
 
-    # 3. Singleton TrainManager + MessageRouter (defined in vehicle endpoint)
+    # Singleton TrainManager + MessageRouter (defined in vehicle endpoint)
     from app.api.v1.endpoints.vehicle import vehicle_manager, vehicle_message_router
 
-    # 4. DriverDeskSource — connects to the physical PLC via TCP.
+    # DriverDeskSource — connects to the physical PLC via TCP.
     #    Retries automatically if the PLC is not reachable (no crash).
     #    Publishes driver_input and comm_state onto `bus`.
     from app.communication.driver_desk_source import DriverDeskSource
@@ -85,7 +109,7 @@ async def lifespan(app: FastAPI):
         record_raw=True,
     )
 
-    # 5. PlcFeedbackAggregator — subscribes to train_state on `bus` and
+    # PlcFeedbackAggregator — subscribes to train_state on `bus` and
     #    calls send_to_plc() every 100 ms so the cab display stays in sync.
     from app.communication.plc_feedback_aggregator import PlcFeedbackAggregator
     plc_aggregator = PlcFeedbackAggregator(
@@ -95,7 +119,7 @@ async def lifespan(app: FastAPI):
     )
     plc_aggregator.attach(bus)
 
-    # 6. Route PLC driver_input into the vehicle simulation.
+    # Route PLC driver_input into the vehicle simulation.
     def _on_driver_input(topic: str, data: dict) -> None:
         data.setdefault("source", "driver_tcp")
         vehicle_message_router.handle({"type": "driver_input", **data})
@@ -106,7 +130,7 @@ async def lifespan(app: FastAPI):
     bus.subscribe("driver_input", _on_driver_input)
     bus.subscribe("comm_state", _on_comm_state)
 
-    # 7. Simulation loop — ticks every 100 ms, publishes train_state.
+    # Simulation loop — ticks every 100 ms, publishes train_state.
     from app.vehicle_sim.simulation_loop import SimulationLoop
     sim_loop = SimulationLoop(
         vehicle_manager,
@@ -129,10 +153,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await sim_loop.stop()
-        await zmq_dashboard_listener.stop()
         plc_aggregator.stop()
         plc_source.stop()
         bus.stop()
+        await _stop_common()
         logger.info("Full pipeline stopped")
 
 
@@ -159,4 +183,11 @@ app.mount("/data", StaticFiles(directory=Path(__file__).parent / "data"), name="
 
 @app.get("/", tags=["health"])
 def health_check():
-    return {"status": "ok", "data_source": settings.DATA_SOURCE}
+    return {
+        "status": "ok",
+        "data_source": settings.DATA_SOURCE,
+        "enable_dashboard_mock": settings.ENABLE_DASHBOARD_MOCK,
+        "enable_zmq_broker_manager": settings.ENABLE_ZMQ_BROKER_MANAGER,
+        "enable_zmq_dashboard_listener": settings.ENABLE_ZMQ_DASHBOARD_LISTENER,
+        "enable_vehicle_process_manager": settings.ENABLE_VEHICLE_PROCESS_MANAGER,
+    }

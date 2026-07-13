@@ -55,6 +55,94 @@ def test_single_train_router_only_handles_owned_driver_input():
     assert train.cached_brake_level == 0
 
 
+def test_enable_fallback_ato_is_disabled_by_default():
+    manager = _single_train_manager(position=1500.0)
+    router = MessageRouter(manager, owned_vehicle_id="TRAIN-001")
+    train = manager.get_train("TRAIN-001")
+
+    result = router.handle(
+        {
+            "type": "enable_fallback_ato",
+            "vehicle_id": "TRAIN-001",
+            "target_position": 1800.0,
+        }
+    )
+
+    assert result == {
+        "ok": True,
+        "ignored": True,
+        "reason": "legacy_fallback_ato_disabled",
+    }
+    assert train.fallback_ato is None
+    assert train.next_stop_target_m is None
+
+
+def test_enable_fallback_ato_updates_owned_stop_target():
+    manager = _single_train_manager(position=1500.0)
+    router = MessageRouter(
+        manager,
+        owned_vehicle_id="TRAIN-001",
+        allow_legacy_fallback_ato=True,
+    )
+    train = manager.get_train("TRAIN-001")
+    train.next_stop_target_m = 1000.0
+    train.stop_target_m = 1000.0
+    train.state.emergency_brake = True
+
+    router.handle(
+        {
+            "type": "enable_fallback_ato",
+            "vehicle_id": "TRAIN-001",
+            "target_position": 1800.0,
+        }
+    )
+
+    assert train.next_stop_target_m == 1800.0
+    assert train.stop_target_m == 1800.0
+    assert train.state.emergency_brake is False
+    assert train.state.mode == "ato"
+
+
+def test_station_demo_fallback_ignores_non_demo_ma_updates():
+    manager = _single_train_manager(position=1500.0)
+    router = MessageRouter(
+        manager,
+        owned_vehicle_id="TRAIN-001",
+        allow_legacy_fallback_ato=True,
+    )
+    train = manager.get_train("TRAIN-001")
+
+    router.handle(
+        {
+            "type": "enable_fallback_ato",
+            "vehicle_id": "TRAIN-001",
+            "target_position": 1800.0,
+            "reason": "station_demo_approach",
+        }
+    )
+    router.handle(
+        {
+            "type": "ma_state",
+            "vehicle_id": "TRAIN-001",
+            "ma_limit": 2500.0,
+            "speed_limit": 30.0,
+            "reason": "default_signal_control",
+        }
+    )
+    assert train.ma_limit is None
+
+    router.handle(
+        {
+            "type": "ma_state",
+            "vehicle_id": "TRAIN-001",
+            "ma_limit": 2200.0,
+            "speed_limit": 48.0,
+            "reason": "station_demo_approach",
+        }
+    )
+    assert train.ma_limit == 2200.0
+
+
 def test_single_train_router_only_handles_owned_flat_ma_state():
     manager = _single_train_manager()
     router = MessageRouter(manager, owned_vehicle_id="TRAIN-001")

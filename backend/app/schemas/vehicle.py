@@ -63,3 +63,25 @@ class VehicleManagementResponse(BaseModel):
     topic: Literal["add_train", "remove_train", "clear_trains", "reset_trains"]
     result: Dict[str, Any]
     trains: list[Dict[str, Any]]
+
+
+class StationDemoRequest(BaseModel):
+    station_id: Optional[str] = None
+    station_name: Optional[str] = None
+    headway_sec: float = Field(default=10.0, ge=5.0)
+    dwell_sec: float = Field(default=4.0, ge=2.0)
+    max_active_trains: int = Field(default=4, ge=1, le=12)
+    approach_distance_m: float = Field(default=450.0, ge=100.0)
+    exit_distance_m: float = Field(default=1000.0, ge=100.0)
+    min_train_spacing_m: float = Field(default=260.0, ge=120.0)
+    cruise_speed_kmh: float = Field(default=28.0, ge=5.0, le=80.0)
+    start_index: int = Field(default=20, ge=1)
+
+
+class LineOperationRequest(BaseModel):
+    headway_sec: float = Field(default=8.0, ge=3.0)
+    max_active_trains: int = Field(default=10, ge=2, le=30)
+    dwell_sec: float = Field(default=4.0, ge=2.0)
+    min_train_spacing_m: float = Field(default=550.0, ge=150.0)
+    start_index_up: int = Field(default=2000, ge=1)
+    start_index_down: int = Field(default=3000, ge=1)
