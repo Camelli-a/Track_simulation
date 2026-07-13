@@ -13,7 +13,9 @@ class SignalService(BaseService):
         elif self.source == "udp":
             raise NotImplementedError("UDP 数据源尚未实现")
         elif self.source == "zmq":
-            raise NotImplementedError("ZMQ 数据源尚未实现")
+            # 当使用zmq模式时，暂时返回mock数据
+            # TODO: 实现真正的ZMQ信号数据获取
+            return self._mock_status()
         else:
             raise ValueError(f"未知数据源: {self.source}")
 
