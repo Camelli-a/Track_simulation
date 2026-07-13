@@ -90,6 +90,9 @@ def test_train_state_protocol_keeps_ato_control_fields():
         atp_intervened=True,
         ato_brake_bias=1.3,
         ato_brake_bias_enabled=True,
+        ato_brake_bias_adaptation_enabled=True,
+        last_brake_bias_adjustment={"error_m": 0.4},
+        brake_bias_history_size=1,
     ).to_protocol()
 
     for field in [
@@ -103,6 +106,12 @@ def test_train_state_protocol_keeps_ato_control_fields():
         "atp_intervened",
         "ato_brake_bias",
         "ato_brake_bias_enabled",
+        "ato_brake_bias_adaptation_enabled",
+        "last_brake_bias_adjustment",
+        "brake_bias_history_size",
+        "curve_output_enabled",
+        "curve_history_size",
+        "curve_point",
     ]:
         assert field in protocol
 
@@ -111,6 +120,11 @@ def test_train_state_protocol_keeps_ato_control_fields():
     assert protocol["atp_intervened"] is True
     assert protocol["ato_brake_bias"] == 1.3
     assert protocol["ato_brake_bias_enabled"] is True
+    assert protocol["ato_brake_bias_adaptation_enabled"] is True
+    assert protocol["last_brake_bias_adjustment"]["error_m"] == 0.4
+    assert protocol["brake_bias_history_size"] == 1
+    assert protocol["curve_output_enabled"] is True
+    assert protocol["curve_history_size"] == 300
 
 
 def test_train_stop_result_protocol_contains_vehicle_and_unit_aliases():
@@ -152,5 +166,11 @@ def test_single_train_step_all_protocol_has_visualization_and_ato_fields():
         "applied_brake_level",
         "ato_brake_bias",
         "ato_brake_bias_enabled",
+        "ato_brake_bias_adaptation_enabled",
+        "last_brake_bias_adjustment",
+        "brake_bias_history_size",
+        "curve_output_enabled",
+        "curve_history_size",
+        "curve_point",
     ]:
         assert field in state

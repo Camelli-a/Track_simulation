@@ -71,6 +71,12 @@ class TrainState:
     active_faults: tuple[str, ...] = ()
     ato_brake_bias: float = 1.0
     ato_brake_bias_enabled: bool = False
+    ato_brake_bias_adaptation_enabled: bool = False
+    last_brake_bias_adjustment: Optional[dict] = None
+    brake_bias_history_size: int = 0
+    curve_output_enabled: bool = True
+    curve_history_size: int = 300
+    curve_point: Optional[dict] = None
 
     @property
     def speed_kmh(self) -> float:
@@ -198,6 +204,14 @@ class TrainState:
             "active_faults": list(self.active_faults),
             "ato_brake_bias": round(self.ato_brake_bias, 3),
             "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
+            "ato_brake_bias_adaptation_enabled": (
+                self.ato_brake_bias_adaptation_enabled
+            ),
+            "last_brake_bias_adjustment": self.last_brake_bias_adjustment,
+            "brake_bias_history_size": self.brake_bias_history_size,
+            "curve_output_enabled": self.curve_output_enabled,
+            "curve_history_size": self.curve_history_size,
+            "curve_point": self.curve_point,
         }
 
 

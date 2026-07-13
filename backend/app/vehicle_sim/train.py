@@ -76,6 +76,21 @@ class Train:
         self.ato_jerk_limit_enabled = True
         self.ato_brake_bias_enabled = True
         self.ato_brake_bias = TrainAtoController.DEFAULT_BRAKE_BIAS
+        self.ato_brake_bias_adaptation_enabled = True
+        self.ato_brake_bias_learning_rate = 0.04
+        self.ato_brake_bias_deadband_m = 0.20
+        self.ato_brake_bias_max_step_per_stop = 0.05
+        self.ato_brake_bias_min_samples = 1
+        self.ato_brake_bias_history_size = 10
+        self.ato_brake_bias_history = []
+        self.ato_brake_bias_adapted_targets = set()
+        self.last_brake_bias_adjustment = None
+        self.sim_time_s = 0.0
+        self.curve_output_enabled = True
+        self.curve_history_enabled = True
+        self.curve_history_size = 300
+        self.curve_history = []
+        self.last_curve_point = None
         self.current_traction_level = 0
         self.current_brake_level = 0
         self.cached_traction_level = 0
@@ -556,6 +571,10 @@ class Train:
             else self.stop_target_m - self.state.position
         )
         self._maybe_generate_stop_result()
+        self._maybe_adapt_brake_bias_from_stop_result()
+        self.sim_time_s += max(0.0, float(dt))
+        self._update_curve_output()
+        self._sync_control_state_to_train_state()
         self._sync_public_state()
         self._clear_transient_events()
 
@@ -693,7 +712,7 @@ class Train:
         self.state.driving_mode = self.driving_mode
         self.state.control_source = self.control_source
         self.state.ato_state = self.ato_state
-        self.state.ato_target_speed_kmh = self.ato_target_speed_kmh
+        self.state.ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
         self.state.ato_traction_level = self.ato_traction_level
         self.state.ato_brake_level = self.ato_brake_level
         self.state.commanded_traction_level = self.commanded_traction_level
@@ -701,8 +720,8 @@ class Train:
         self.state.applied_traction_level = self.applied_traction_level
         self.state.applied_brake_level = self.applied_brake_level
         self.state.atp_intervened = self.atp_intervened
-        self.state.stop_target = self.stop_target_m
-        self.state.distance_to_stop = self.distance_to_stop_m
+        self.state.stop_target = getattr(self, "stop_target_m", getattr(self, "stop_target", None))
+        self.state.distance_to_stop = getattr(self, "distance_to_stop_m", getattr(self, "distance_to_stop", None))
         self.state.stop_result = self._stop_result_to_dict()
         self.state.ato_brake_bias = self.ato_brake_bias
         self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
@@ -712,7 +731,7 @@ class Train:
         self.state.ato_capable = self.ato_capable
         self.state.auto_reverse_cap = self.auto_reverse_capable
         self.state.auto_reverse_active = self.auto_reverse_active
-        self.state.recommended_speed_kmh = self.recommended_speed_kmh
+        self.state.recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
         self.state.recommended_speed = 0.0 if self.recommended_speed_kmh is None else self.recommended_speed_kmh
         self.state.parking_brake = self.parking_brake_applied
         self.state.external_speed_limit_kmh = self.external_speed_limit_kmh
@@ -906,6 +925,207 @@ class Train:
             )
             self.stop_result_published_for_target = True
 
+    def _maybe_adapt_brake_bias_from_stop_result(self) -> None:
+        stop_result = self._stop_result_to_dict()
+        if not self._is_stop_result_eligible_for_brake_bias_adaptation(stop_result):
+            return
+
+        target_position_m = self._stop_result_value(
+            stop_result,
+            "target_position_m",
+            "target_position",
+        )
+        actual_position_m = self._stop_result_value(
+            stop_result,
+            "actual_position_m",
+            "actual_position",
+        )
+        error_m = self._stop_result_value(stop_result, "error_m")
+        target_key = round(target_position_m, 2)
+        old_bias = self.ato_brake_bias
+        delta = self._compute_brake_bias_delta_from_error(error_m)
+        new_bias = self.train_ato_controller.normalize_brake_bias(
+            old_bias + delta,
+            enabled=True,
+        )
+        applied_delta = round(new_bias - old_bias, 6)
+        if applied_delta == 0.0:
+            self.ato_brake_bias_adapted_targets.add(target_key)
+            return
+
+        self.ato_brake_bias = new_bias
+        record = {
+            "vehicle_id": self.state.vehicle_id,
+            "target_position_m": target_position_m,
+            "actual_position_m": actual_position_m,
+            "error_m": error_m,
+            "old_brake_bias": round(old_bias, 6),
+            "new_brake_bias": round(new_bias, 6),
+            "delta": applied_delta,
+            "qualified": stop_result.get("qualified"),
+            "status": stop_result.get("status"),
+        }
+        self.ato_brake_bias_history.append(record)
+        self.ato_brake_bias_history = self.ato_brake_bias_history[
+            -self.ato_brake_bias_history_size :
+        ]
+        self.last_brake_bias_adjustment = record
+        self.ato_brake_bias_adapted_targets.add(target_key)
+
+    def _is_stop_result_eligible_for_brake_bias_adaptation(self, stop_result: dict | None) -> bool:
+        if not self.ato_brake_bias_adaptation_enabled:
+            return False
+        if not self.ato_brake_bias_enabled:
+            return False
+        if self.driving_mode != "AM":
+            return False
+        if self.atp_intervened or self.state.emergency_brake:
+            return False
+        if self.last_ato_output is None or self.last_ato_output.degraded:
+            return False
+        if not stop_result:
+            return False
+        if stop_result.get("vehicle_id") != self.state.vehicle_id:
+            return False
+
+        target_position_m = self._stop_result_value(
+            stop_result,
+            "target_position_m",
+            "target_position",
+        )
+        actual_position_m = self._stop_result_value(
+            stop_result,
+            "actual_position_m",
+            "actual_position",
+        )
+        error_m = self._stop_result_value(stop_result, "error_m")
+        speed_ms = self._stop_result_value(stop_result, "speed_mps", "speed_ms")
+        if (
+            target_position_m is None
+            or actual_position_m is None
+            or error_m is None
+            or speed_ms is None
+        ):
+            return False
+        if abs(error_m) < self.ato_brake_bias_deadband_m:
+            return False
+        if speed_ms > 0.3:
+            return False
+
+        target_key = round(target_position_m, 2)
+        return target_key not in self.ato_brake_bias_adapted_targets
+
+    def _compute_brake_bias_delta_from_error(self, error_m: float) -> float:
+        raw_delta = float(error_m) * self.ato_brake_bias_learning_rate
+        return max(
+            -self.ato_brake_bias_max_step_per_stop,
+            min(self.ato_brake_bias_max_step_per_stop, raw_delta),
+        )
+
+    def _stop_result_value(self, stop_result: dict, *keys):
+        for key in keys:
+            if key in stop_result and stop_result[key] is not None:
+                try:
+                    value = float(stop_result[key])
+                except (TypeError, ValueError):
+                    return None
+                if self.train_ato_controller.is_finite_number(value):
+                    return value
+                return None
+        return None
+
+    def _update_curve_output(self):
+        if not self.curve_output_enabled:
+            self.last_curve_point = None
+            return
+
+        self.last_curve_point = self._build_curve_point()
+        if self.curve_history_enabled:
+            self.curve_history.append(self.last_curve_point)
+            self.curve_history = self.curve_history[-self.curve_history_size :]
+
+    def _build_curve_point(self) -> dict:
+        distance_to_ma_m = None
+        if self.ma_limit is not None:
+            distance_to_ma_m = self.ma_limit - self.state.position
+
+        stop_target_m = self.stop_target_m
+        if stop_target_m is None:
+            stop_target_m = self.next_stop_target_m
+        distance_to_stop_m = None
+        if stop_target_m is not None:
+            distance_to_stop_m = stop_target_m - self.state.position
+
+        degraded = None
+        if self.last_ato_output is not None:
+            degraded = self.last_ato_output.degraded
+
+        recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
+        if recommended_speed_kmh is None:
+            recommended_speed_kmh = getattr(self, "recommended_speed", None)
+
+        legacy_ato_target_speed = getattr(self, "ato_target_speed", None)
+        ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
+        if (
+            ato_target_speed_kmh is None
+            or (
+                ato_target_speed_kmh == 0.0
+                and legacy_ato_target_speed is not None
+                and self.last_ato_output is None
+            )
+        ):
+            ato_target_speed_kmh = legacy_ato_target_speed
+
+        return {
+            "time_s": round(self.sim_time_s, 3),
+            "vehicle_id": self.state.vehicle_id,
+            "line_id": self.state.line_id,
+            "position_m": round(self.state.position, 3),
+            "direction": self.state.protocol_direction,
+            "speed_mps": round(self.state.speed_ms, 3),
+            "speed_kmh": round(self.state.speed_kmh, 3),
+            "acceleration_mps2": round(self.state.acceleration, 3),
+            "recommended_speed_mps": (
+                None if recommended_speed_kmh is None else round(float(recommended_speed_kmh) / 3.6, 3)
+            ),
+            "recommended_speed_kmh": self._round_optional(recommended_speed_kmh),
+            "ato_target_speed_mps": (
+                None if ato_target_speed_kmh is None else round(float(ato_target_speed_kmh) / 3.6, 3)
+            ),
+            "ato_target_speed_kmh": self._round_optional(ato_target_speed_kmh),
+            "allowed_speed_kmh": self._round_optional(self.allowed_speed_kmh),
+            "eb_trigger_speed_kmh": self._round_optional(self.eb_trigger_speed_kmh),
+            "ma_limit_m": self._round_optional(self.ma_limit),
+            "distance_to_ma_m": self._round_optional(distance_to_ma_m),
+            "stop_target_m": self._round_optional(stop_target_m),
+            "distance_to_stop_m": self._round_optional(distance_to_stop_m),
+            "ato_brake_level": self.ato_brake_level,
+            "commanded_brake_level": self.commanded_brake_level,
+            "applied_brake_level": self.applied_brake_level,
+            "ato_traction_level": self.ato_traction_level,
+            "commanded_traction_level": self.commanded_traction_level,
+            "applied_traction_level": self.applied_traction_level,
+            "driving_mode": self.driving_mode,
+            "control_source": self.control_source,
+            "ato_state": self.ato_state,
+            "atp_intervened": self.atp_intervened,
+            "emergency_brake": self.state.emergency_brake,
+            "degraded": degraded,
+            "ato_brake_bias": round(self.ato_brake_bias, 3),
+            "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
+            "ato_brake_bias_adaptation_enabled": (
+                self.ato_brake_bias_adaptation_enabled
+            ),
+        }
+
+    def _round_optional(self, value):
+        if value is None:
+            return None
+        try:
+            return round(float(value), 3)
+        except (TypeError, ValueError):
+            return None
+
     def _stop_result_to_dict(self) -> dict | None:
         if self.last_stop_result is None:
             return None
@@ -925,6 +1145,52 @@ class Train:
             "speed_mps": result.speed_ms,
         }
 
+    def _sync_control_state_to_train_state(self):
+        self.state.driving_mode = self.driving_mode
+        self.state.ato_state = self.ato_state
+        recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
+        if recommended_speed_kmh is None:
+            recommended_speed_kmh = getattr(self, "recommended_speed", 0.0)
+
+        legacy_ato_target_speed = getattr(self, "ato_target_speed", None)
+        ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
+        if (
+            ato_target_speed_kmh is None
+            or (
+                ato_target_speed_kmh == 0.0
+                and legacy_ato_target_speed is not None
+                and self.last_ato_output is None
+            )
+        ):
+            ato_target_speed_kmh = legacy_ato_target_speed
+        if ato_target_speed_kmh is None:
+            ato_target_speed_kmh = 0.0
+
+        self.state.recommended_speed = recommended_speed_kmh
+        self.state.recommended_speed_kmh = recommended_speed_kmh
+        self.state.ato_target_speed = ato_target_speed_kmh
+        self.state.ato_target_speed_kmh = ato_target_speed_kmh
+        self.state.ato_traction_level = self.ato_traction_level
+        self.state.ato_brake_level = self.ato_brake_level
+        self.state.commanded_traction_level = self.commanded_traction_level
+        self.state.commanded_brake_level = self.commanded_brake_level
+        self.state.applied_traction_level = self.applied_traction_level
+        self.state.applied_brake_level = self.applied_brake_level
+        self.state.control_source = self.control_source
+        self.state.atp_intervened = self.atp_intervened
+        self.state.stop_target = getattr(self, "stop_target_m", getattr(self, "stop_target", None))
+        self.state.distance_to_stop = getattr(self, "distance_to_stop_m", getattr(self, "distance_to_stop", None))
+        self.state.stop_result = self._stop_result_to_dict()
+        self.state.ato_brake_bias = self.ato_brake_bias
+        self.state.ato_brake_bias_enabled = self.ato_brake_bias_enabled
+        self.state.ato_brake_bias_adaptation_enabled = (
+            self.ato_brake_bias_adaptation_enabled
+        )
+        self.state.last_brake_bias_adjustment = self.last_brake_bias_adjustment
+        self.state.brake_bias_history_size = len(self.ato_brake_bias_history)
+        self.state.curve_output_enabled = self.curve_output_enabled
+        self.state.curve_history_size = self.curve_history_size
+        self.state.curve_point = self.last_curve_point
     def _effective_external_allowed_speed(self) -> float | None:
         candidates = [
             value
