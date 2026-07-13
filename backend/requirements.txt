@@ -5,3 +5,5 @@ pydantic-settings==2.3.4
 python-dotenv==1.0.1
 pyzmq==26.0.3
 pytest==8.2.2
+pandas==3.0.3
+xlrd==2.0.2
