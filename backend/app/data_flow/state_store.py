@@ -16,6 +16,12 @@ from app.data_flow.data_mapper import (
     normalize_switch,
     normalize_train,
 )
+from app.data_flow.ato_guidance import (
+    build_ato_guidance,
+    build_ato_precheck,
+    build_input_lights,
+    build_plc_feedback,
+)
 from app.data_flow.display_text import (
     alarm_level_label,
     alarm_source_label,
@@ -611,12 +617,54 @@ class DashboardStateStore:
     def get_snapshot(self) -> DashboardSnapshot:
         now = time.time()
         with self._lock:
+            data_source = settings.DATA_SOURCE if settings.DATA_SOURCE in {"mock", "udp", "zmq"} else "unknown"
+            communication = self._communication.model_dump()
+            last_real_message_at = communication.get("last_real_message_at") or communication.get("last_message_at")
+            if last_real_message_at is not None:
+                communication["no_message_seconds"] = max(0.0, now - float(last_real_message_at))
+            if data_source == "zmq" and (
+                last_real_message_at is None
+                or now - float(last_real_message_at) > ZMQ_HEALTH_TIMEOUT_SECONDS
+            ):
+                communication["zmq_connected"] = False
+            comm_status = CommunicationStatus(**communication)
+
             trains = []
             for train in self._trains.values():
                 payload = train.model_dump()
                 payload = self._with_stale_status(payload, now, "train")
                 if payload["is_stale"]:
                     payload["is_running"] = False
+                driver_snapshot = self._driver_inputs.get(train.vehicle_id)
+                driver_payload = (
+                    self._with_stale_status(driver_snapshot.model_dump(), now, "driver_input")
+                    if driver_snapshot
+                    else None
+                )
+                ma_snapshot = self._ma_limits.get(train.vehicle_id)
+                ma_payload = (
+                    self._with_stale_status(ma_snapshot.model_dump(), now, "ma")
+                    if ma_snapshot
+                    else None
+                )
+                comm_payload = comm_status.model_dump()
+                precheck = build_ato_precheck(driver_payload, payload, ma_payload, comm_payload)
+                plc_feedback = build_plc_feedback(
+                    driver_payload,
+                    payload,
+                    comm_payload,
+                    precheck=precheck,
+                )
+                payload["input_lights"] = build_input_lights(driver_payload)
+                payload["plc_feedback"] = plc_feedback
+                payload["output_lights"] = dict(plc_feedback)
+                payload["ato_guidance"] = build_ato_guidance(
+                    driver_payload,
+                    payload,
+                    ma_payload,
+                    comm_payload,
+                    precheck=precheck,
+                )
                 trains.append(TrainSnapshot(**payload))
 
             driver_inputs = [
@@ -645,17 +693,6 @@ class DashboardStateStore:
             ]
             power = PowerSnapshot(**self._with_stale_status(self._power.model_dump(), now, "power"))
 
-            data_source = settings.DATA_SOURCE if settings.DATA_SOURCE in {"mock", "udp", "zmq"} else "unknown"
-            communication = self._communication.model_dump()
-            last_real_message_at = communication.get("last_real_message_at") or communication.get("last_message_at")
-            if last_real_message_at is not None:
-                communication["no_message_seconds"] = max(0.0, now - float(last_real_message_at))
-            if data_source == "zmq" and (
-                last_real_message_at is None
-                or now - float(last_real_message_at) > ZMQ_HEALTH_TIMEOUT_SECONDS
-            ):
-                communication["zmq_connected"] = False
-            comm_status = CommunicationStatus(**communication)
             system_status, degraded_reasons = self._derive_system_status(
                 data_source=data_source,
                 communication=comm_status,

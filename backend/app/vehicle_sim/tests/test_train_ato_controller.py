@@ -476,6 +476,31 @@ def test_am_creeps_near_stop_target():
     assert output.ato_target_speed_kmh <= controller.CRAWL_SPEED_MS * 3.6 + 0.001
 
 
+def test_am_static_creep_uses_stronger_start_traction():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(position_m=1496.8, speed_ms=0.0, stop_target_m=1500.0)
+    )
+
+    assert output.ato_state == "creep"
+    assert output.ato_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_brake_level == 0
+
+
+def test_am_static_creep_continues_until_stop_window():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(position_m=1499.0, speed_ms=0.0, stop_target_m=1500.0)
+    )
+
+    assert output.ato_state == "creep"
+    assert output.ato_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_brake_level == 0
+
+
 def test_am_creep_brakes_when_current_speed_exceeds_low_speed_target():
     controller = _controller()
 

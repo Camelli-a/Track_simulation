@@ -79,12 +79,14 @@ def test_single_train_router_only_handles_owned_flat_ma_state():
             "ma_limit": 1500.0,
             "speed_limit": 40.0,
             "distance_to_ma": 500.0,
+            "stop_target_m": 313.0,
         }
     )
 
     assert train.ma_limit == 1500.0
     assert train.allowed_speed_kmh == 40.0
     assert train.target_distance_m == 500.0
+    assert train.next_stop_target_m == 313.0
 
 
 def test_single_train_router_filters_batch_ma_limits_to_owned_train():

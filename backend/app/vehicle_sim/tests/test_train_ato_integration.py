@@ -351,7 +351,7 @@ def test_stop_result_in_window_in_train_state():
     assert abs(result["error_cm"] - 30.0) < 1.0
 
 
-def test_stop_result_overshoot_in_train_state():
+def test_stop_result_is_not_generated_before_stop_window_overshoot():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
     train.state.position = 1501.0
@@ -361,11 +361,11 @@ def test_stop_result_overshoot_in_train_state():
 
     train.step_tick(0.1)
 
-    assert train.state.stop_result["status"] == "overshoot"
-    assert train.state.stop_result["qualified"] is False
+    assert train.state.stop_result is None
+    assert train.stop_result_published_for_target is False
 
 
-def test_stop_result_undershoot_in_train_state():
+def test_stop_result_is_not_generated_before_stop_window_undershoot():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
     train.state.position = 1499.0
@@ -375,8 +375,8 @@ def test_stop_result_undershoot_in_train_state():
 
     train.step_tick(0.1)
 
-    assert train.state.stop_result["status"] == "undershoot"
-    assert train.state.stop_result["qualified"] is False
+    assert train.state.stop_result is None
+    assert train.stop_result_published_for_target is False
 
 
 def test_stop_result_is_not_regenerated_for_same_target():
@@ -407,6 +407,7 @@ def test_stop_result_resets_when_stop_target_changes():
     train.step_tick(0.1)
     first_result = train.last_stop_result
     train.next_stop_target_m = 1502.0
+    train.state.position = 1502.1
     train.step_tick(0.1)
 
     assert first_result is not None

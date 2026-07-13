@@ -233,6 +233,7 @@ def test_multi_train_ato_instances_are_isolated():
     train_sm.state.position = 1199.8
     train_sm.state.speed_ms = 0.0
     train_sm.next_stop_target_m = 1200.0
+    train_sm.door_state.last_auto_target_m = 1200.0
     _apply_ma(
         train_sm,
         ma_limit=1500.0,
