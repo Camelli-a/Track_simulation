@@ -23,6 +23,8 @@ import {
 
 // 图表最多渲染多少历史点（太多点 ECharts 会卡）
 const MAX_DISPLAY = 600
+// Store 内部也要限长；否则 WS 持续追加会让页面打开越久越卡。
+const MAX_HISTORY_POINTS = 900
 // REST 降级轮询间隔
 const POLL_INTERVAL_MS = 1000
 // WS 重连等待（指数退避上限）
@@ -91,6 +93,13 @@ export const useSpeedCurveStore = defineStore('speedCurve', () => {
     error.value = null
   }
 
+  function appendHistoryPoint(point) {
+    const pts = historyPoints.value
+    const last = pts[pts.length - 1] ?? null
+    if (shouldSkipRepeatedStopPoint(point, last)) return
+    historyPoints.value = trimHistoryPoints([...pts, point])
+  }
+
   // ── WebSocket ────────────────────────────────────────────────────────
   function _connectWs(vehicleId) {
     _closeWs()
@@ -123,15 +132,15 @@ export const useSpeedCurveStore = defineStore('speedCurve', () => {
 
       if (msg.type === 'history') {
         // 批量历史点（连接时首帧）
-        const pts = msg.points ?? []
-        historyPoints.value = pts
+        const pts = normalizeHistoryPoints(msg.points ?? [])
+        historyPoints.value = trimHistoryPoints(pts)
         // 顺手拉一次预测
         _fetchPredict(vehicleId)
       } else if (msg.type === 'point') {
         // 单点追加
         const pt = msg.point
         if (pt) {
-          historyPoints.value = [...historyPoints.value, pt]
+          appendHistoryPoint(pt)
         }
       } else if (msg.type === 'ping') {
         // keepalive，不处理
@@ -204,7 +213,9 @@ export const useSpeedCurveStore = defineStore('speedCurve', () => {
         getSpeedCurveHistory(vehicleId, MAX_DISPLAY),
       ])
       if (statusRes.status === 'fulfilled') currentStatus.value = statusRes.value
-      if (historyRes.status === 'fulfilled') historyPoints.value = historyRes.value?.points ?? []
+      if (historyRes.status === 'fulfilled') {
+        historyPoints.value = trimHistoryPoints(normalizeHistoryPoints(historyRes.value?.points ?? []))
+      }
       error.value = null
     } catch (err) {
       error.value = err.message ?? '数据获取失败'
@@ -318,3 +329,32 @@ export const useSpeedCurveStore = defineStore('speedCurve', () => {
     stopAll,
   }
 })
+
+function trimHistoryPoints(points) {
+  return points.length > MAX_HISTORY_POINTS ? points.slice(-MAX_HISTORY_POINTS) : points
+}
+
+function normalizeHistoryPoints(points) {
+  const normalized = []
+  let last = null
+  for (const point of points) {
+    if (!point || shouldSkipRepeatedStopPoint(point, last)) continue
+    normalized.push(point)
+    last = point
+  }
+  return normalized
+}
+
+function shouldSkipRepeatedStopPoint(point, last) {
+  if (!last) return false
+  const position = Number(point.position_m)
+  const speed = Number(point.speed_kmh)
+  const lastPosition = Number(last.position_m)
+  const lastSpeed = Number(last.speed_kmh)
+  if (![position, speed, lastPosition, lastSpeed].every(Number.isFinite)) return false
+  return (
+    Math.abs(position - lastPosition) < 0.05
+    && Math.abs(speed) < 0.05
+    && Math.abs(lastSpeed) < 0.05
+  )
+}

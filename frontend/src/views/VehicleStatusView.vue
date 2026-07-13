@@ -20,7 +20,7 @@
             :class="selectedVehicleId === vehicle.vehicle_id
               ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-100'
               : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/20 hover:text-slate-200'"
-            @click="selectedVehicleId = vehicle.vehicle_id"
+            @click="selectVehicle(vehicle.vehicle_id)"
           >
             {{ vehicle.vehicle_id }}
           </button>
@@ -43,7 +43,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import SpeedCurvePanel from '@/components/vehicle/SpeedCurvePanel.vue'
 import DriverDeskPanel from '@/components/vehicle/DriverDeskPanel.vue'
 import TripStatusPanel from '@/components/vehicle/TripStatusPanel.vue'
@@ -59,9 +59,35 @@ const selectedVehicleId = ref(simStore.selectedVehicleId ?? null)
 
 onMounted(() => {
   speedCurveStore.startAll()
+  if (selectedVehicleId.value) {
+    speedCurveStore.selectVehicle(selectedVehicleId.value)
+  }
 })
 
 onBeforeUnmount(() => {
   speedCurveStore.stopAll()
 })
+
+watch(
+  () => speedCurveStore.selectedVehicleId,
+  (vehicleId) => {
+    if (vehicleId && selectedVehicleId.value !== vehicleId) {
+      selectedVehicleId.value = vehicleId
+    }
+  },
+)
+
+watch(
+  () => simStore.selectedVehicleId,
+  (vehicleId) => {
+    if (!selectedVehicleId.value && vehicleId) {
+      selectVehicle(vehicleId)
+    }
+  },
+)
+
+function selectVehicle(vehicleId) {
+  selectedVehicleId.value = vehicleId
+  speedCurveStore.selectVehicle(vehicleId)
+}
 </script>

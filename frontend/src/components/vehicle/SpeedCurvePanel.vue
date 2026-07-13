@@ -284,7 +284,10 @@ const chartOption = computed(() => {
   const predicted = store.showPrediction ? store.predictedPoints : []
 
   // 历史曲线：[position_m, speed_kmh]
-  const historySeries = history.map((p) => [p.position_m, p.speed_kmh])
+  // 展示层只做两件事：
+  // 1. 停车后同一位置反复刷新的 0 速点只保留代表点，避免图上堆成一团。
+  // 2. 位置明显回跳时插入断点，避免多次运行/重启的历史被强行连成扇形。
+  const historySeries = buildDisplaySeries(history)
 
   // 预测曲线：position_m 是相对当前位置的偏移，需要加上当前最后位置
   const lastPos = history.length ? history[history.length - 1].position_m : 0
@@ -358,9 +361,9 @@ const chartOption = computed(() => {
         name: '实际速度',
         type: 'line',
         data: historySeries,
-        smooth: 0.3,
+        smooth: false,
         symbol: 'none',
-        sampling: 'lttb',
+        connectNulls: false,
         lineStyle: { color: '#22d3ee', width: 2 },
         areaStyle: {
           color: {
@@ -398,4 +401,38 @@ const chartOption = computed(() => {
     ],
   }
 })
+
+function buildDisplaySeries(points) {
+  const series = []
+  let lastKept = null
+
+  for (const point of points) {
+    const position = Number(point.position_m)
+    const speed = Number(point.speed_kmh)
+    if (!Number.isFinite(position) || !Number.isFinite(speed)) continue
+
+    if (lastKept) {
+      const positionDelta = position - lastKept.position
+      const isPositionRollback = positionDelta < -5
+      const isRepeatedStopPoint =
+        Math.abs(positionDelta) < 0.05
+        && Math.abs(speed) < 0.05
+        && Math.abs(lastKept.speed) < 0.05
+
+      if (isPositionRollback) {
+        series.push([null, null])
+      }
+
+      if (isRepeatedStopPoint) {
+        continue
+      }
+    }
+
+    const item = [position, speed]
+    series.push(item)
+    lastKept = { position, speed }
+  }
+
+  return series
+}
 </script>
