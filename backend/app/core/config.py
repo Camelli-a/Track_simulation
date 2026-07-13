@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     PLC_HOST: str = "192.168.100.123"
     PLC_PORT: int = 8001
 
+    # Signal screen MMI over TCP (信号屏).
+    SIGNAL_MMI_HOST: str = "192.168.100.121"
+    SIGNAL_MMI_PORT: int = 9999
+
     # ZMQ broker addresses.
     ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
     ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"
