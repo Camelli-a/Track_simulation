@@ -64,7 +64,7 @@
     source = ScenerySource()
     source.start()
     # 其他模块更新状态：
-    source.update_own_train(speed_mmps=8333, section_distance_mm=12000, edge_id=101, direction=1)
+    source.update_own_train(speed_mmps=8333, section_distance_mm=12000, edge_id=3, direction=1)
     source.update_signal(index=0, state=0x02)   # 第1个信号机绿灯
     source.update_switch(index=0, state=0x01)   # 第1个道岔定位
     source.stop()
@@ -75,7 +75,7 @@ import struct
 import threading
 import logging
 import time
-from typing import Optional
+from typing import Any, Mapping, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,33 @@ class ScenerySource:
             if accel is not None:
                 self._accel = max(0, min(accel, 127))
             self._dwell_time = dwell_time
+
+    def update_own_train_from_state(self, train_state: Mapping[str, Any] | Any) -> bool:
+        """Update the UDP frame from train_state using visual edge mapping.
+
+        The viewer protocol expects the visual edge id plus offset inside that
+        visual edge. Do not pass the internal LinkId or section id as EdgeID.
+        """
+        from app.data_flow.visual_mapping import build_visual_payload
+
+        visual = build_visual_payload(train_state)
+        edge_id = visual.get("edge_id")
+        edge_offset_m = visual.get("edge_offset_m")
+        if edge_id is None or edge_offset_m is None:
+            logger.warning(
+                "Skip scenery update: no visual edge for vehicle=%s position_m=%s",
+                visual.get("vehicle_id"),
+                visual.get("position_m"),
+            )
+            return False
+
+        self.update_own_train(
+            speed_mmps=int(round(float(visual.get("speed_mps", 0.0)) * 1000.0)),
+            section_distance_mm=int(round(float(edge_offset_m) * 1000.0)),
+            edge_id=int(edge_id),
+            direction=int(visual.get("direction", 1) or 1),
+        )
+        return True
 
     def update_signal(self, index: int, state: int):
         """

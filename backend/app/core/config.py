@@ -36,6 +36,14 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 
+    # 3D viewer mapping for the current TRAIN-001 acceptance run.
+    # Internal position_m is still the vehicle/ATO coordinate.  The viewer
+    # coordinate is only used in the visualization payload.
+    VISUAL_TRACK: int = 0
+    VISUAL_DIRECTION_NAME: str = "down"
+    SIGNAL_COORD_OFFSET_M: float = 216.46
+    VIEWER_ABS_OFFSET_M: float = 4028.28
+
     class Config:
         env_file = ".env"
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Literal, Optional
 import time
 
@@ -6,6 +7,7 @@ from .vehicle_parameters import TRAIN_LENGTH_M
 
 
 Mode = Literal["manual", "ato", "atp", "emergency"]
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,7 +111,7 @@ class TrainState:
 
     def to_protocol(self) -> dict:
         """Convert internal state to the train_state protocol message."""
-        return {
+        protocol = {
             "type": "train_state",
             "timestamp": time.time(),
             "vehicle_id": self.vehicle_id,
@@ -213,6 +215,13 @@ class TrainState:
             "curve_history_size": self.curve_history_size,
             "curve_point": self.curve_point,
         }
+        try:
+            from app.data_flow.visual_mapping import build_visual_payload
+
+            protocol.update(build_visual_payload(protocol))
+        except Exception:
+            logger.exception("Failed to enrich train_state with visual mapping")
+        return protocol
 
 
 @dataclass
