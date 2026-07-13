@@ -212,12 +212,24 @@ class Train:
         stops: list[float] = []
         seen: set[float] = set()
         for section in getattr(self.track, "sections", []):
+            if not getattr(section, "station_id", None):
+                continue
             key = self._stop_target_key(getattr(section, "stop_position", None))
             if key is None or key in seen:
                 continue
             seen.add(key)
             stops.append(float(getattr(section, "stop_position")))
         return stops
+
+    def _station_stop_position_at(self, position_m: float) -> float | None:
+        if hasattr(self.track, "get_section"):
+            section = self.track.get_section(float(position_m))
+            if not getattr(section, "station_id", None):
+                return None
+            return getattr(section, "stop_position", None)
+        if hasattr(self.track, "get_stop_position"):
+            return self.track.get_stop_position(float(position_m))
+        return None
 
     def _find_next_track_stop_m(self, position_m: float | None = None) -> float | None:
         position = self.state.position if position_m is None else float(position_m)
@@ -1004,11 +1016,10 @@ class Train:
             and self._is_completed_stop_target(self.next_stop_target_m)
         ):
             self.next_stop_target_m = None
-        if hasattr(self.track, "get_stop_position"):
-            stop_position = self.track.get_stop_position(self.state.position)
+        stop_position = self._station_stop_position_at(self.state.position)
+        if stop_position is not None:
             if (
                 not self._is_completed_stop_target(stop_position)
-                and stop_position is not None
                 and abs(float(stop_position) - self.state.position)
                 <= self.door_stop_tolerance_m
             ):
@@ -1017,10 +1028,9 @@ class Train:
         if next_track_stop is not None:
             self.next_stop_target_m = next_track_stop
             return next_track_stop
-        if hasattr(self.track, "get_stop_position"):
-            stop_position = self.track.get_stop_position(self.state.position)
-            if not self._is_completed_stop_target(stop_position):
-                return stop_position
+        stop_position = self._station_stop_position_at(self.state.position)
+        if stop_position is not None and not self._is_completed_stop_target(stop_position):
+            return stop_position
         return None
 
     def _maybe_generate_stop_result(self) -> None:

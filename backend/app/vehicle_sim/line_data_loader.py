@@ -47,6 +47,12 @@ def build_track_sections(layout: dict[str, Any]) -> list[TrackSection]:
             start, end = end, start
         speed_limit = _effective_speed_limit_kmh(section, speed_limits, start, end)
         edge_id = _int_or_none(section.get("edge_id") or section.get("track_seg_id")) or index
+        station_id = section.get("station_id")
+        stop_position = (
+            _valid_stop_position(section.get("stop_position"), start, end)
+            if station_id
+            else None
+        )
 
         result.append(
             TrackSection(
@@ -55,8 +61,8 @@ def build_track_sections(layout: dict[str, Any]) -> list[TrackSection]:
                 end=end,
                 gradient=_normalize_gradient_permille(section.get("gradient", 0.0)),
                 speed_limit=speed_limit,
-                station_id=section.get("station_id"),
-                stop_position=_valid_stop_position(section.get("stop_position"), start, end),
+                station_id=station_id,
+                stop_position=stop_position,
                 edge_id=edge_id,
                 begin_km=_float_or_none(section.get("begin_km")) or start / 1000.0,
                 end_km=_float_or_none(section.get("end_km")) or end / 1000.0,
