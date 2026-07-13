@@ -14,36 +14,36 @@ D:\大三下\小学期\Track_simulation
 
 ### A. 必须启动
 
-| 进程 | 负责什么 | 输入 | 输出 | 依赖 | 明天是否必须 |
-|---|---|---|---|---|---|
-| ZMQ broker | XPUB/XSUB 消息总线代理，转发所有 topic | 各模块 PUB 到 `tcp://127.0.0.1:5556` | 各模块 SUB 从 `tcp://127.0.0.1:5555` 收 | 无，必须第一个启动 | 是 |
-| FastAPI dashboard 后端 | REST/WebSocket dashboard；`DATA_SOURCE=zmq` 时内置 `DriverDeskSource`、`PlcFeedbackAggregator`、ZMQ dashboard listener | ZMQ topic、司机台 PLC TCP、REST 控制 | dashboard snapshot、WebSocket、driver_input、PLC feedback | broker | 是 |
-| TRAIN-001 车辆进程 | 单车动力学、ATO/ATP、车门状态；发布 `train_state/ato_state/atp_state/door_state` | `driver_input`、`ma_state`、`comm_state`、`power_state` | `train_state` 等 ZMQ topic | broker，建议 FastAPI 已启动 | 是，若采用一车一进程演示 |
-| 司机台输入进程 | 真实司机台接入 | PLC TCP 46B/100ms | ZMQ `driver_input`、`comm_state` | broker | 是，但推荐由 FastAPI 内置启动，不另开独立脚本 |
-| 前端 | 可视化 dashboard | FastAPI `/api` 和 `/ws` | 浏览器页面 | FastAPI | 需要展示页面时是 |
+| 进程                   | 负责什么                                                                                                               | 输入                                                    | 输出                                                      | 依赖                        | 明天是否必须                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------- | --------------------------- | --------------------------------------------- |
+| ZMQ broker             | XPUB/XSUB 消息总线代理，转发所有 topic                                                                                 | 各模块 PUB 到 `tcp://127.0.0.1:5556`                    | 各模块 SUB 从 `tcp://127.0.0.1:5555` 收                   | 无，必须第一个启动          | 是                                            |
+| FastAPI dashboard 后端 | REST/WebSocket dashboard；`DATA_SOURCE=zmq` 时内置 `DriverDeskSource`、`PlcFeedbackAggregator`、ZMQ dashboard listener | ZMQ topic、司机台 PLC TCP、REST 控制                    | dashboard snapshot、WebSocket、driver_input、PLC feedback | broker                      | 是                                            |
+| TRAIN-001 车辆进程     | 单车动力学、ATO/ATP、车门状态；发布 `train_state/ato_state/atp_state/door_state`                                       | `driver_input`、`ma_state`、`comm_state`、`power_state` | `train_state` 等 ZMQ topic                                | broker，建议 FastAPI 已启动 | 是，若采用一车一进程演示                      |
+| 司机台输入进程         | 真实司机台接入                                                                                                         | PLC TCP 46B/100ms                                       | ZMQ `driver_input`、`comm_state`                          | broker                      | 是，但推荐由 FastAPI 内置启动，不另开独立脚本 |
+| 前端                   | 可视化 dashboard                                                                                                       | FastAPI `/api` 和 `/ws`                                 | 浏览器页面                                                | FastAPI                     | 需要展示页面时是                              |
 
 说明：`backend/main.py` 在 `DATA_SOURCE=zmq` 时会自动启动 `DriverDeskSource` 和 `PlcFeedbackAggregator`。因此明天真实司机台联调时，推荐让 FastAPI 负责 PLC 连接，不要同时运行 `debug_driver_desk.py` 抢同一个 PLC 连接。
 
 ### B. 按演示需要启动
 
-| 进程 | 负责什么 | 输入 | 输出 | 依赖 | 何时启动 |
-|---|---|---|---|---|---|
-| `signal_worker` | 订阅 `train_state`，计算并发布 `signal_state/ma_state/ato_command` | `train_state`、`route_request` | `signal_state`、`ma_state`、`ato_command` | broker，车辆进程 | 要展示实时 MA/signal_state 时启动 |
-| `station_stop_scenario` | 发布最小 AM 到站停车 demo 输入 | 无外部输入 | `driver_input`、`ma_state`、`comm_state`、`power_state` | broker，车辆进程 | 无真实司机台或不用 `signal_worker` 时用于单车 demo |
-| `vehicle_flow_observer` | 观察一辆车的 ZMQ 流程摘要 | ZMQ topics | 控制台摘要，可写 jsonl | broker | 调试推荐启动 |
-| 外部视觉系统 | 消费后端输出的车辆位置 | dashboard snapshot 或 ZMQ `train_state` | 三维显示 | FastAPI 或 ZMQ | 需要联调三维视景时启动 |
-| `debug_scenery.py` | 手动发 UDP 给视景系统 | 控制台命令 | UDP 8302 -> 8303 | 视觉系统网络 | 仅手动硬件排查，不是自动车辆链路 |
+| 进程                    | 负责什么                                                           | 输入                                    | 输出                                                    | 依赖             | 何时启动                                           |
+| ----------------------- | ------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------- | ---------------- | -------------------------------------------------- |
+| `signal_worker`         | 订阅 `train_state`，计算并发布 `signal_state/ma_state/ato_command` | `train_state`、`route_request`          | `signal_state`、`ma_state`、`ato_command`               | broker，车辆进程 | 要展示实时 MA/signal_state 时启动                  |
+| `station_stop_scenario` | 发布最小 AM 到站停车 demo 输入                                     | 无外部输入                              | `driver_input`、`ma_state`、`comm_state`、`power_state` | broker，车辆进程 | 无真实司机台或不用 `signal_worker` 时用于单车 demo |
+| `vehicle_flow_observer` | 观察一辆车的 ZMQ 流程摘要                                          | ZMQ topics                              | 控制台摘要，可写 jsonl                                  | broker           | 调试推荐启动                                       |
+| 外部视觉系统            | 消费后端输出的车辆位置                                             | dashboard snapshot 或 ZMQ `train_state` | 三维显示                                                | FastAPI 或 ZMQ   | 需要联调三维视景时启动                             |
+| `debug_scenery.py`      | 手动发 UDP 给视景系统                                              | 控制台命令                              | UDP 8302 -> 8303                                        | 视觉系统网络     | 仅手动硬件排查，不是自动车辆链路                   |
 
 ### C. 当前不要启动
 
-| 进程/做法 | 原因 |
-|---|---|
-| 多个 `signal_worker` | 会重复发布 `ma_state/signal_state/ato_command` |
-| `mock_publisher` 与 `signal_worker` 同时跑 | `mock_publisher` 也会随机发布 `ma_state/signal_state`，会混入真实链路 |
-| 多辆车 `TRAIN-002/003` | 明天验收先限定 `TRAIN-001` 单车 |
-| 上行/反向/对向相关脚本或配置 | 当前视景映射固定下行、`track=0` |
-| `debug_driver_desk.py` 与 FastAPI 同时连接真实 PLC | 两个 TCP 客户端可能抢同一司机台连接，导致连接时好时坏 |
-| 手动视景脚本当作自动适配器 | `debug_scenery.py/manual_scenery_control.py` 是手动调试脚本，不会自动订阅 `train_state` |
+| 进程/做法                                          | 原因                                                                                    |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 多个 `signal_worker`                               | 会重复发布 `ma_state/signal_state/ato_command`                                          |
+| `mock_publisher` 与 `signal_worker` 同时跑         | `mock_publisher` 也会随机发布 `ma_state/signal_state`，会混入真实链路                   |
+| 多辆车 `TRAIN-002/003`                             | 明天验收先限定 `TRAIN-001` 单车                                                         |
+| 上行/反向/对向相关脚本或配置                       | 当前视景映射固定下行、`track=0`                                                         |
+| `debug_driver_desk.py` 与 FastAPI 同时连接真实 PLC | 两个 TCP 客户端可能抢同一司机台连接，导致连接时好时坏                                   |
+| 手动视景脚本当作自动适配器                         | `debug_scenery.py/manual_scenery_control.py` 是手动调试脚本，不会自动订阅 `train_state` |
 
 ## 二、是否需要 ZMQ broker
 
@@ -458,3 +458,139 @@ $t.door_state
 - 把 `viewer_position_m` 用于控车
 - 同时用 FastAPI 和 `debug_driver_desk.py` 连接同一个真实司机台 PLC
 
+## 自动错峰发车模式
+
+这个模式用于明天的 TRAIN-001 单车为主、附带虚拟车错峰发车演示。它会按顺序启动多个独立车辆进程；每辆车仍然从 `position_m=0` 上线。launcher 只负责启动进程和观察上一辆车是否离开起点，不负责控车。
+
+终端 1：broker
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe -m app.communication.broker
+```
+
+终端 2：FastAPI dashboard 后端
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+终端 3：signal_worker
+
+如果展示真实 MA / `signal_state`，启动：
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe -m app.communication.signal_worker
+```
+
+如果使用 demo MA 或 `station_stop_scenario`，不要同时启动 `signal_worker`，避免同一辆车收到冲突的 `ma_state`。
+
+终端 4：手动启动 TRAIN-001 车辆进程
+
+`TRAIN-001` 是硬件绑定车，必须单独启动，并等待真实司机台状态、ATO 按钮和 precheck 通过后才运行。launcher 不启动 `TRAIN-001`。
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe -m app.vehicle_sim.main_integrated --vehicle-id TRAIN-001 --train-index 1 --initial-position 0 --dt 0.1
+```
+
+终端 5：auto_departure_launcher
+
+launcher 只监控 `TRAIN-001`，并从 `TRAIN-002` 开始自动错峰启动后续 virtual ATO 车辆。
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe scripts\auto_departure_launcher.py --anchor-vehicle-id TRAIN-001 --launch-from-index 2 --max-index 3 --initial-position 0 --clear-distance 200 --dt 0.1 --poll-interval 1.0
+```
+
+### 终端 4B：无真实司机台时的 demo 输入，可选
+
+项目中没有找到 `backend/scripts/mock_driver_console.py`，也没有 `scripts` 目录下的司机台 mock。当前可用的单车 demo 输入脚本是：
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe -m app.communication.station_stop_scenario --vehicle-id TRAIN-001 --ma-limit 500 --allowed-speed 45 --stop-target 313 --duration 60 --dt 0.1
+```
+
+它会发布：
+
+- `driver_input`
+- `ma_state`
+- `comm_state`
+- `power_state`
+
+不要和 `signal_worker` 同时用于同一个 demo，避免 `ma_state` 冲突。
+
+### 终端 5：真实司机台接入
+
+推荐方式：由终端 2 的 FastAPI 自动接入。
+
+配置来自 `backend/app/core/config.py` 和 `backend/.env`：
+
+```text
+PLC_HOST=192.168.100.123
+PLC_PORT=8001
+vehicle_id=TRAIN-001
+```
+
+独立调试脚本存在：
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe debug_driver_desk.py --host 192.168.100.123 --port 8001
+```
+
+但它用于单独排查 PLC 接收/发送，不建议与 FastAPI 同时连接真实司机台。当前工作区版本的 `debug_driver_desk.py` 没有 `--auto-feedback` 参数。
+
+终端 6：前端
+
+```powershell
+cd D:\大三下\小学期\Track_simulation\frontend
+npm run dev
+```
+
+### 终端 8：视觉/3D
+
+未找到正式的自动 `train_state -> ScenerySource UDP` 独立启动入口。
+
+当前后端对外 `train_state` / dashboard payload 已包含：
+
+- `vehicle_id`
+- `position_m`
+- `speed_mps`
+- `direction`
+- `edge_id`
+- `edge_offset_m`
+- `viewer_position_m`
+- `line_id`
+
+视觉系统可以从 dashboard snapshot 或 ZMQ `train_state` 读取这些字段。
+
+手动 UDP 调试脚本存在，但仅用于手动排查，不是自动联动：
+
+````powershell
+cd D:\大三下\小学期\Track_simulation\backend
+.\.venv\Scripts\python.exe debug_scenery.py --host 18.32.115.28 --port 8303
+
+终端 7：dashboard 查询
+
+```powershell
+$r = Invoke-RestMethod http://127.0.0.1:8000/api/v1/dashboard/snapshot
+$r.trains | Where-Object {$_.vehicle_id -like "TRAIN-*"} | Select-Object vehicle_id, position_m, speed_kmh, edge_id, viewer_position_m, door_state
+````
+
+说明：
+
+- `auto_departure_launcher` 不启动 `TRAIN-001`。
+- `TRAIN-001` 由终端 4 单独手动启动，上线后仍然需要真实司机台状态和 ATO 按钮才会移动。
+- launcher 只监控 `TRAIN-001.position_m`。
+- 当 `TRAIN-001.position_m >= clear-distance`，例如 `200m`，launcher 才启动 `TRAIN-002`。
+- `TRAIN-002` 是 virtual ATO，不需要真实司机台。
+- 当 `TRAIN-002` 离开起点后，launcher 启动 `TRAIN-003`。
+- 明天现场推荐先把 `--max-index 2`，确认稳定后再改成 `--max-index 3`。
+- launcher 有演示安全上限，`--max-index` 最大为 `5`。
+- 所有车都从 `initial-position=0` 启动。
+- launcher 不发布 `driver_input`、`ma_state`、`ato_command`，不会和 `signal_worker` 或 demo MA 脚本抢 `ma_state`。
+- 这个 launcher 只是演示级发车器，不是完整运行图调度系统。

@@ -172,6 +172,34 @@ class Train:
         self._sync_indicator_outputs()
         self._sync_public_state()
 
+    def configure_virtual_ato(self) -> None:
+        """Prepare a non-hardware train for autonomous demo operation."""
+        self.state.direction_code = 1
+        self.key_switch_active = True
+        self.manual_emergency_requested = False
+        self.emergency_pending = False
+        self.parking_brake_applied = False
+        self.parking_release_requested = True
+        self.requested_traction_level = 0
+        self.requested_brake_level = 0
+        self.cached_traction_level = 0
+        self.cached_brake_level = 0
+        self.requested_traction_percent = 0.0
+        self.requested_brake_percent = 0.0
+        self.current_traction_level = 0
+        self.current_brake_level = 0
+        self.current_traction_percent = 0.0
+        self.current_brake_percent = 0.0
+        self.ato_capable = True
+        self.ato_start_requested = True
+        self.hardware_ato_active = True
+        self.driving_mode = "AM"
+        self.control_source = "ato"
+        if not self.state.emergency_brake:
+            self.state.mode = "ato"
+        self._sync_door_state()
+        self._sync_public_state()
+
     def apply_ma_state(self, ma_limit: MaLimit):
         if ma_limit.vehicle_id == self.state.vehicle_id:
             self.ma_limit = ma_limit.ma_limit

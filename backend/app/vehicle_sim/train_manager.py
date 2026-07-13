@@ -55,6 +55,9 @@ class TrainManager:
         train = Train(vehicle_id, line_id, self.track, train_index=slot)
         train.state.position = float(position)
         train.state.is_running = train.state.speed_ms > 0.0
+        train.set_next_stop_target_m(train._find_next_track_stop_m(train.state.position))
+        if vehicle_id != "TRAIN-001":
+            train.configure_virtual_ato()
         self.trains[vehicle_id] = train
         self.slot_to_vehicle_id[slot] = vehicle_id
         self.vehicle_id_to_slot[vehicle_id] = slot
