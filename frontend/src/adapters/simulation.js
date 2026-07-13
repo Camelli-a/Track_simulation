@@ -8,11 +8,22 @@ export function normalizeTick(raw) {
   return normalizeLegacyTick(raw)
 }
 
+export function normalizeSceneState(raw) {
+  if (!raw) return null
+  return {
+    type: raw.type ?? 'dashboard_scene_state',
+    timestamp: raw.timestamp ?? Date.now() / 1000,
+    active_scene: normalizeSceneStateItem(raw.active_scene),
+    vehicle_scene_map: (raw.vehicle_scene_map ?? []).map(normalizeSceneStateItem),
+  }
+}
+
 function normalizeDashboardSnapshot(raw) {
   return {
     type: 'dashboard_snapshot',
     protocol_version: raw.protocol_version ?? '1.0',
     timestamp: raw.timestamp ?? Date.now() / 1000,
+    scenarios: (raw.scenarios ?? []).map(normalizeScenarioConfig),
     communication: normalizeCommunication(raw.communication),
     driver_inputs: (raw.driver_inputs ?? []).map(normalizeDriverInput),
     ato_commands: (raw.ato_commands ?? []).map(normalizeAtoCommand),
@@ -36,6 +47,7 @@ function normalizeLegacyTick(raw) {
     type: 'tick',
     protocol_version: raw.protocol_version ?? null,
     timestamp: raw.timestamp ?? Date.now() / 1000,
+    scenarios: (raw.scenarios ?? []).map(normalizeScenarioConfig),
     communication: normalizeCommunication(raw.communication ?? raw.comm_state),
     driver_inputs: (raw.driver_inputs ?? []).map(normalizeDriverInput),
     ato_commands: (raw.ato_commands ?? []).map(normalizeAtoCommand),
@@ -87,6 +99,8 @@ function normalizeVehicle(v) {
     parking_phase: v.parking_phase ?? deriveParkingPhase(v),
     stop_error_cm: v.stop_error_cm ?? null,
     platform_id: v.platform_id ?? null,
+    station_id: v.station_id ?? v.stationId ?? null,
+    track_id: v.track_id ?? v.trackId ?? null,
     section_id: v.section_id ?? v.sectionId ?? null,
     edge_id: v.edge_id ?? v.edgeId ?? null,
     edge_offset_m: v.edge_offset_m ?? v.edgeOffsetM ?? null,
@@ -119,6 +133,7 @@ function normalizeSection(s) {
     segment_id: segmentId,
     line_id: s.line_id ?? null,
     track_seg_id: s.track_seg_id ?? null,
+    track_id: s.track_id ?? s.trackId ?? null,
     start: s.start ?? 0,
     end: s.end ?? 0,
     gradient: s.gradient ?? null,
@@ -279,6 +294,38 @@ function normalizeRouteResult(result) {
     required_position: result.required_position ?? null,
     current_position: result.current_position ?? null,
     locked_by_route_id: result.locked_by_route_id ?? null,
+  }
+}
+
+function normalizeScenarioConfig(scenario) {
+  const pageConfig = scenario?.page_config ?? {}
+  return {
+    scenario_id: scenario?.scenario_id ?? 'unknown',
+    name: scenario?.name ?? scenario?.scenario_id ?? 'Unknown scenario',
+    description: scenario?.description ?? '',
+    page_config: {
+      hero_panel: pageConfig.hero_panel ?? null,
+      primary_chart: pageConfig.primary_chart ?? null,
+      secondary_chart: pageConfig.secondary_chart ?? null,
+      panels: pageConfig.panels ?? [],
+      key_metrics: pageConfig.key_metrics ?? [],
+      highlight_events: pageConfig.highlight_events ?? [],
+    },
+  }
+}
+
+function normalizeSceneStateItem(item) {
+  if (!item) return null
+  return {
+    scenario_id: item.scenario_id ?? 'line_run',
+    scope: item.scope ?? (item.vehicle_id || item.target_vehicle_id ? 'vehicle' : 'network'),
+    vehicle_id: item.vehicle_id ?? item.target_vehicle_id ?? null,
+    target_vehicle_id: item.target_vehicle_id ?? item.vehicle_id ?? null,
+    summary: item.summary ?? '',
+    reason: item.reason ?? null,
+    key_metrics: item.key_metrics ?? [],
+    highlight_events: item.highlight_events ?? [],
+    updated_at: item.updated_at ?? null,
   }
 }
 

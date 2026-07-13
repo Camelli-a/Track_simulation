@@ -1,11 +1,16 @@
 <template>
-  <span
-    class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium tracking-wide shadow-[0_8px_20px_rgba(15,23,42,0.28)]"
-    :class="badgeClass"
+  <div
+    class="inline-flex items-center gap-1 rounded-full border border-white/10 bg-slate-950/60 px-1.5 py-1 shadow-[0_8px_20px_rgba(15,23,42,0.22)] backdrop-blur"
   >
-    <span class="w-2 h-2 rounded-full" :class="dotClass" />
-    {{ label }}
-  </span>
+    <span
+      v-for="item in statusItems"
+      :key="item.key"
+      class="rounded-full px-2 py-0.5 text-[11px] font-medium tracking-wide transition-colors"
+      :class="item.active ? item.activeClass : 'text-slate-500'"
+    >
+      {{ item.label }}
+    </span>
+  </div>
 </template>
 
 <script setup>
@@ -17,24 +22,41 @@ const props = defineProps({
   dataStale: { type: Boolean, default: false },
 })
 
-const label = computed(() => {
-  if (props.connecting) return '正在连接'
-  if (!props.connected) return '连接断开'
-  if (props.dataStale) return '数据滞后'
-  return '实时同步'
+const currentStatus = computed(() => {
+  if (props.connecting) return 'connecting'
+  if (!props.connected) return 'disconnected'
+  if (props.dataStale) return 'stale'
+  return 'realtime'
 })
 
-const badgeClass = computed(() => {
-  if (props.connecting) return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
-  if (!props.connected) return 'border-red-500/25 bg-red-500/10 text-red-200'
-  if (props.dataStale) return 'border-amber-500/25 bg-amber-500/10 text-amber-200'
-  return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100'
-})
+const statusItems = computed(() => {
+  const active = currentStatus.value
 
-const dotClass = computed(() => {
-  if (props.connecting) return 'bg-cyan-300 animate-pulse'
-  if (!props.connected) return 'bg-red-400'
-  if (props.dataStale) return 'bg-amber-300'
-  return 'bg-emerald-300 animate-pulse'
+  return [
+    {
+      key: 'disconnected',
+      label: '断开',
+      active: active === 'disconnected',
+      activeClass: 'bg-red-500/16 text-red-200',
+    },
+    {
+      key: 'connecting',
+      label: '连接中',
+      active: active === 'connecting',
+      activeClass: 'bg-cyan-500/16 text-cyan-200',
+    },
+    {
+      key: 'stale',
+      label: '滞后',
+      active: active === 'stale',
+      activeClass: 'bg-amber-500/16 text-amber-200',
+    },
+    {
+      key: 'realtime',
+      label: '实时',
+      active: active === 'realtime',
+      activeClass: 'bg-emerald-500/16 text-emerald-200',
+    },
+  ]
 })
 </script>

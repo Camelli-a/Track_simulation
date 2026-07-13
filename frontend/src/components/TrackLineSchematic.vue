@@ -3,12 +3,22 @@
   <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
-        <h3 class="text-sm font-semibold text-gray-200">北京地铁 9 号线</h3>
+        <h3 class="text-sm font-semibold text-gray-200">{{ lineLabel }}</h3>
         <p class="text-xs text-gray-500 mt-0.5">
-          郭公庄 ↓ 国家图书馆 · {{ sortedStations.length }} 站 · {{ formatKm(totalLength) }}
+          {{ firstStationName }} ↓ {{ lastStationName }} · {{ sortedStations.length }} 站 · {{ formatKm(totalLength) }}
+        </p>
+        <p class="text-[11px] text-slate-400 mt-1">
+          轨道底色表示占用状态；停车或放行请结合选中列车的信号 / MA 一起看。
         </p>
       </div>
       <div class="flex items-center gap-3 text-xs text-gray-500">
+        <span
+          v-if="selectedTrain"
+          class="text-[10px] px-2 py-1 rounded border"
+          :class="selectedPermissionChipClass"
+        >
+          {{ selectedPermissionText }}
+        </span>
         <span>{{ vehicles.length }} 列在线</span>
       </div>
     </div>
@@ -113,7 +123,7 @@
 
         <!-- 站名 -->
         <div class="flex-1 flex flex-col min-w-0" :style="{ height: `${chartHeight}px` }">
-          <p class="text-[10px] text-gray-600 mb-1 shrink-0">郭公庄 ↑</p>
+          <p class="text-[10px] text-gray-600 mb-1 shrink-0">{{ firstStationName }} ↑</p>
           <div class="flex-1 flex flex-col justify-between">
             <div
               v-for="(st, idx) in sortedStations"
@@ -134,7 +144,7 @@
               <span class="text-[10px] text-gray-500 shrink-0">{{ st.name }}</span>
             </div>
           </div>
-          <p class="text-[10px] text-gray-600 mt-1 shrink-0">国家图书馆 ↓</p>
+          <p class="text-[10px] text-gray-600 mt-1 shrink-0">{{ lastStationName }} ↓</p>
         </div>
       </div>
     </div>
@@ -147,8 +157,10 @@
       </span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full border border-emerald-400" /> 车站</span>
       <span class="text-gray-400">点击站名可展开站场视图</span>
-      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400" /> 空闲区段</span>
-      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500" /> 占用</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400" /> 空闲区段</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500" /> 临近占用</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-400" /> 已占用</span>
+      <span class="text-gray-400">是否允许继续运行请看上方“前方许可”</span>
       <span
         v-for="v in vehicles"
         :key="`lg-${v.vehicle_id}`"
@@ -171,6 +183,7 @@ const props = defineProps({
   stations: { type: Array, default: () => [] },
   segments: { type: Array, default: () => [] },
   vehicles: { type: Array, default: () => [] },
+  lineLabel: { type: String, default: '线路' },
   totalLength: { type: Number, default: 47500 },
   selectedId: { type: String, default: null },
   selectedStationId: { type: String, default: null },
@@ -194,6 +207,14 @@ const sortedStations = computed(() =>
   [...props.stations].sort((a, b) => a.position - b.position)
 )
 
+const firstStationName = computed(() =>
+  sortedStations.value[0]?.name ?? '起点'
+)
+
+const lastStationName = computed(() =>
+  sortedStations.value[sortedStations.value.length - 1]?.name ?? '终点'
+)
+
 const rowSlotH = computed(() => ROW_SLOT)
 
 const chartHeight = computed(() => {
@@ -209,18 +230,33 @@ const selectedTrain = computed(() =>
 
 /** 列车 Y 坐标 + 重叠时错开（插值后平滑移动） */
 const trainMarkers = computed(() => {
-  const sorted = [...displayVehicles.value].sort((a, b) => a.position - b.position)
-  const placed = []
   const minGap = 16
+  const sorted = [...displayVehicles.value]
+    .map((vehicle) => ({ ...vehicle, baseY: segY(vehicle.position) }))
+    .sort((a, b) => a.baseY - b.baseY || String(a.vehicle_id).localeCompare(String(b.vehicle_id)))
 
-  for (const v of sorted) {
-    let y = segY(v.position)
-    for (const p of placed) {
-      if (Math.abs(p.y - y) < minGap) y = p.y + minGap
+  const clusters = []
+  for (const vehicle of sorted) {
+    const lastCluster = clusters[clusters.length - 1]
+    if (
+      lastCluster
+      && lastCluster.some((item) => Math.abs(item.baseY - vehicle.baseY) < minGap)
+    ) {
+      lastCluster.push(vehicle)
+    } else {
+      clusters.push([vehicle])
     }
-    placed.push({ ...v, y })
   }
-  return placed
+
+  return clusters.flatMap((cluster) => {
+    const ordered = [...cluster].sort((a, b) =>
+      String(a.vehicle_id).localeCompare(String(b.vehicle_id)),
+    )
+    return ordered.map((vehicle, index) => ({
+      ...vehicle,
+      y: vehicle.baseY + (index - (ordered.length - 1) / 2) * minGap,
+    }))
+  })
 })
 
 const visibleSegments = computed(() => {
@@ -248,6 +284,24 @@ function aspectFill(seg) {
 function formatKm(m) {
   return `${(m / 1000).toFixed(1)} km`
 }
+
+const selectedPermissionText = computed(() => {
+  const train = selectedTrain.value
+  if (!train) return ''
+  if (train.permission === 'stop' || train.signal_state === 'red') return `${train.vehicle_id} · 前方许可：红灯停车`
+  if (train.permission === 'restricted' || train.signal_state === 'yellow') return `${train.vehicle_id} · 前方许可：黄灯限速`
+  if (train.permission === 'allow' || train.signal_state === 'green') return `${train.vehicle_id} · 前方许可：绿灯允许`
+  return `${train.vehicle_id} · 前方许可：待确认`
+})
+
+const selectedPermissionChipClass = computed(() => {
+  const train = selectedTrain.value
+  if (!train) return 'border-slate-700 text-slate-300'
+  if (train.permission === 'stop' || train.signal_state === 'red') return 'border-red-500/50 bg-red-950 text-red-200'
+  if (train.permission === 'restricted' || train.signal_state === 'yellow') return 'border-amber-500/50 bg-amber-950 text-amber-200'
+  if (train.permission === 'allow' || train.signal_state === 'green') return 'border-emerald-500/40 bg-emerald-950 text-emerald-200'
+  return 'border-slate-700 text-slate-300'
+})
 </script>
 
 <style scoped>

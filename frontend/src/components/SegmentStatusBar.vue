@@ -13,9 +13,9 @@
       </div>
     </div>
     <div v-if="showLabels" class="flex text-[9px] text-gray-600 px-1 py-1 gap-1">
-      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-emerald-900/60" />空闲</span>
-      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-yellow-900/50" />接近</span>
-      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-red-900/70" />占用</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-sky-900/70" />空闲区段</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-900/60" />临近占用</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-rose-900/70" />已占用</span>
     </div>
   </div>
 </template>
@@ -28,8 +28,8 @@ defineProps({
 
 function segmentClass(seg) {
   const aspect = seg.aspect ?? (seg.occupied ? 'red' : 'green')
-  if (aspect === 'red' || seg.occupied) return 'bg-red-900/70'
-  if (aspect === 'yellow') return 'bg-yellow-900/50'
-  return 'bg-emerald-900/40'
+  if (aspect === 'red' || seg.occupied) return 'bg-rose-900/70'
+  if (aspect === 'yellow') return 'bg-amber-900/60'
+  return 'bg-sky-900/55'
 }
 </script>
