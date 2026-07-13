@@ -9,7 +9,12 @@
       <div class="flex flex-wrap gap-2 text-xs">
         <span class="app-chip">全长 {{ (store.totalLength / 1000).toFixed(1) }} km</span>
         <span class="app-chip">{{ sortedStations.length }} 座车站</span>
+        <span class="app-chip">{{ store.vehicles.length }} 列上屏</span>
+        <span class="app-chip">{{ managedProcessCount }} 个仿真进程</span>
+        <span class="app-chip">{{ store.managedTrains.length }} 列已注册</span>
         <span class="app-chip">{{ runningVehicleCount }} 列在运行</span>
+        <span class="app-chip">{{ occupiedCount }} 个占用分区</span>
+        <span class="app-chip">{{ deniedRouteCount }} 项进路未通过</span>
       </div>
     </div>
 
@@ -96,6 +101,18 @@ const runningVehicleCount = computed(() =>
     || Number(vehicle.speed ?? 0) > 0
     || vehicle.emergency_brake
   ).length
+)
+
+const occupiedCount = computed(() =>
+  store.trackSegments.filter((segment) => segment.occupied).length
+)
+
+const deniedRouteCount = computed(() =>
+  store.routeResults.filter((result) => !result.allowed).length
+)
+
+const managedProcessCount = computed(() =>
+  store.managedTrains.filter((train) => train.process_running).length
 )
 
 watch(

@@ -52,6 +52,11 @@ from app.data_flow.schemas import (
 
 MA_TO_TRAIN_FIELDS = (
     "route_id",
+    "station_id",
+    "station_name",
+    "station_yard_section_id",
+    "station_yard_track_id",
+    "station_yard_route_section_ids",
     "ma_limit",
     "distance_to_ma",
     "permission",
@@ -337,8 +342,12 @@ class DashboardStateStore:
         self.update_train(str(vehicle_id), normalized)
         return str(vehicle_id)
 
-    def replace_trains(self, trains: Iterable[Dict[str, Any]]) -> None:
-        """Merge a managed TrainManager list without overwriting live runtime state."""
+    def replace_trains(self, trains: Iterable[Dict[str, Any]], *, prune_absent: bool = False) -> None:
+        """Merge a managed TrainManager list without overwriting live runtime state.
+
+        Set ``prune_absent`` when the caller is authoritative for the active
+        train roster, for example after /vehicle/manage remove/clear/reset.
+        """
 
         now = time.time()
         snapshots: Dict[str, TrainSnapshot] = {}
@@ -356,6 +365,14 @@ class DashboardStateStore:
             snapshots[vehicle_id] = TrainSnapshot(**normalized)
 
         with self._lock:
+            if prune_absent:
+                managed_ids = set(snapshots)
+                self._trains = {
+                    vehicle_id: item
+                    for vehicle_id, item in self._trains.items()
+                    if vehicle_id in managed_ids
+                }
+
             for vehicle_id, managed_snapshot in snapshots.items():
                 existing = self._trains.get(vehicle_id)
                 if not existing:
@@ -522,9 +539,14 @@ class DashboardStateStore:
             if data.get("yard_layout") or data.get("stations"):
                 self.update_yard_layout(data)
 
-    def update_yard_layout(self, data: Dict[str, Any]) -> None:
-        payload = dict(data.get("yard_layout") or data)
-        payload.setdefault("line_id", data.get("line_id", "LINE-1"))
+    def update_yard_layout(self, data: Dict[str, Any] | YardLayoutSnapshot) -> None:
+        if isinstance(data, YardLayoutSnapshot):
+            payload = data.model_dump()
+            source_line_id = data.line_id
+        else:
+            payload = dict(data.get("yard_layout") or data)
+            source_line_id = data.get("line_id", "LINE-1")
+        payload.setdefault("line_id", source_line_id)
         payload.setdefault("updated_at", time.time())
         with self._lock:
             self._yard_layout = YardLayoutSnapshot(**payload)

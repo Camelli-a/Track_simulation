@@ -12,6 +12,7 @@
       </div>
     </header>
 
+    <VehicleManagementPanel />
     <VehicleHeaderPanel />
 
     <section class="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -51,6 +52,7 @@ import SpeedDistanceChart from '@/components/stopping/SpeedDistanceChart.vue'
 import StopFeasibilityPanel from '@/components/stopping/StopFeasibilityPanel.vue'
 import StopResultPanel from '@/components/stopping/StopResultPanel.vue'
 import VehicleHeaderPanel from '@/components/stopping/VehicleHeaderPanel.vue'
+import VehicleManagementPanel from '@/components/stopping/VehicleManagementPanel.vue'
 import { useSimulationStore } from '@/stores/simulation'
 
 const store = useSimulationStore()

@@ -20,6 +20,12 @@ from app.services.signal_track_config import (
 )
 from app.services.signal_speed_limit import find_static_speed_limit, resolve_speed_limit
 
+ROUTE_EXTENSION_AHEAD_M = 1500.0
+LINE_ROUTE_END = max(
+    [float(route.get("end", 0.0) or 0.0) for route in ROUTES.values()]
+    + [float(section.get("end", 0.0) or 0.0) for section in SECTIONS]
+)
+
 
 @dataclass(frozen=True)
 class DemoVehicle:
@@ -27,6 +33,7 @@ class DemoVehicle:
     position: float
     speed: float
     route_id: str
+    direction_code: int = 1
     train_length: float = DEFAULT_TRAIN_LENGTH
     fault_speed_limit: Optional[float] = None
     emergency_brake: bool = False
@@ -101,6 +108,9 @@ def _normalize_train_states(train_states: list[dict]) -> List[DemoVehicle]:
             position=float(item["position"]),
             speed=float(item["speed"]),
             route_id=str(item["route_id"]),
+            direction_code=_normalize_direction_code(
+                item.get("direction_code", item.get("direction", 1))
+            ),
             train_length=float(item.get("train_length") or DEFAULT_TRAIN_LENGTH),
             fault_speed_limit=(
                 float(item["fault_speed_limit"])
@@ -131,30 +141,37 @@ def _calculate_sections(vehicles: List[DemoVehicle]) -> List[dict]:
 
 
 def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> dict:
-    route = ROUTES.get(vehicle.route_id, ROUTES[DEFAULT_ROUTE_ID])
+    route = _resolve_route_for_vehicle(vehicle)
     front_vehicle = _find_front_vehicle(vehicle, vehicles)
-    route_end = route["end"]
+    direction_sign = _direction_sign(vehicle)
+    route_start = float(route["start"])
+    route_end = float(route["end"])
+    route_boundary = route_end if direction_sign > 0 else route_start
 
     if front_vehicle:
         front_train_length = front_vehicle.train_length
-        front_protection_point = (
-            front_vehicle.position
-            - front_train_length
-            - LOCATION_UNCERTAINTY
-            - COMMUNICATION_MARGIN
-            - SAFETY_MARGIN
+        protection_distance = (
+            front_train_length
+            + LOCATION_UNCERTAINTY
+            + COMMUNICATION_MARGIN
+            + SAFETY_MARGIN
         )
-        ma_limit = min(front_protection_point, route_end)
+        if direction_sign > 0:
+            front_protection_point = front_vehicle.position - protection_distance
+            ma_limit = min(front_protection_point, route_boundary)
+        else:
+            front_protection_point = front_vehicle.position + protection_distance
+            ma_limit = max(front_protection_point, route_boundary)
         front_vehicle_id: Optional[str] = front_vehicle.vehicle_id
         reason = "front_vehicle_protection"
     else:
-        ma_limit = route_end
+        ma_limit = route_boundary
         front_vehicle_id = None
         front_train_length = None
         front_protection_point = None
         reason = "route_end"
 
-    distance_to_ma = ma_limit - vehicle.position
+    distance_to_ma = (ma_limit - vehicle.position) * direction_sign
     signal_rule = _resolve_signal_rule(distance_to_ma, route["speed_limit"], vehicle.speed)
     static_limit = find_static_speed_limit(vehicle.position)
     speed_limit_rule = resolve_speed_limit(
@@ -184,6 +201,8 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "vehicle_id": vehicle.vehicle_id,
         "position": vehicle.position,
         "route_id": vehicle.route_id,
+        "direction_code": vehicle.direction_code,
+        "direction": "reverse" if direction_sign < 0 else "forward",
         "ma_limit": round(ma_limit, 1),
         "distance_to_ma": round(distance_to_ma, 1),
         "permission": permission,
@@ -214,6 +233,55 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "braking_curve_speed_limit": speed_limit_rule["braking_curve_speed_limit"],
         "braking_model": "simplified_atp_braking_curve",
     }
+
+
+def _resolve_route_for_vehicle(vehicle: DemoVehicle) -> dict:
+    configured_route = ROUTES.get(vehicle.route_id)
+    if configured_route is not None and _route_contains_position(configured_route, vehicle.position):
+        return configured_route
+    if configured_route is None:
+        return _dynamic_route(vehicle, ROUTES[DEFAULT_ROUTE_ID])
+
+    containing_routes = [
+        route
+        for route in ROUTES.values()
+        if _route_contains_position(route, vehicle.position)
+    ]
+    if containing_routes:
+        return min(
+            containing_routes,
+            key=lambda route: (
+                abs(float(route["end"]) - float(route["start"])),
+                abs(float(route["end"]) - vehicle.position),
+            ),
+        )
+
+    return _dynamic_route(vehicle, configured_route)
+
+
+def _dynamic_route(vehicle: DemoVehicle, base_route: dict) -> dict:
+    base_start = float(base_route.get("start", 0.0) or 0.0)
+    base_end = float(base_route.get("end", base_start) or base_start)
+    if _direction_sign(vehicle) < 0:
+        dynamic_start = max(0.0, min(base_start, vehicle.position - ROUTE_EXTENSION_AHEAD_M))
+        dynamic_end = max(base_end, LINE_ROUTE_END, vehicle.position)
+    else:
+        dynamic_start = min(base_start, vehicle.position)
+        dynamic_end = max(base_end, LINE_ROUTE_END, vehicle.position + ROUTE_EXTENSION_AHEAD_M)
+    return {
+        **base_route,
+        "route_id": vehicle.route_id,
+        "start": dynamic_start,
+        "end": dynamic_end,
+        "speed_limit": float(base_route.get("speed_limit", 80.0) or 80.0),
+    }
+
+
+def _route_contains_position(route: dict, position: float) -> bool:
+    start = float(route.get("start", 0.0) or 0.0)
+    end = float(route.get("end", start) or start)
+    low, high = (start, end) if start <= end else (end, start)
+    return low <= float(position) <= high
 
 
 def _calculate_signals(ma_limits: List[dict]) -> List[dict]:
@@ -359,11 +427,45 @@ def _find_vehicle_in_section(
 
 
 def _find_front_vehicle(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> Optional[DemoVehicle]:
+    if _direction_sign(vehicle) < 0:
+        front_vehicles = [
+            other
+            for other in vehicles
+            if other.vehicle_id != vehicle.vehicle_id
+            and other.route_id == vehicle.route_id
+            and other.position < vehicle.position
+        ]
+        if not front_vehicles:
+            return None
+        return max(front_vehicles, key=lambda item: item.position)
+
     front_vehicles = [
         other
         for other in vehicles
-        if other.route_id == vehicle.route_id and other.position > vehicle.position
+        if other.vehicle_id != vehicle.vehicle_id
+        and other.route_id == vehicle.route_id
+        and other.position > vehicle.position
     ]
     if not front_vehicles:
         return None
     return min(front_vehicles, key=lambda item: item.position)
+
+
+def _normalize_direction_code(value) -> int:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"reverse", "backward", "down", "-1", "2", "0xaa", "aa"}:
+            return -1
+        if normalized in {"forward", "up", "1", "0x55", "55"}:
+            return 1
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return 1
+    if numeric in {-1, 2, 0xAA}:
+        return -1
+    return 1
+
+
+def _direction_sign(vehicle: DemoVehicle) -> int:
+    return -1 if _normalize_direction_code(vehicle.direction_code) < 0 else 1

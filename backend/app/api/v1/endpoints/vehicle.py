@@ -8,14 +8,19 @@ from pydantic import BaseModel, Field
 from app.data_flow.message_publisher import publish_module_message
 from app.data_flow.state_store import state_store
 from app.schemas.vehicle import (
+    LineOperationRequest,
+    StationDemoRequest,
     VehicleControlRequest,
     VehicleControlResponse,
     VehicleManagementRequest,
     VehicleManagementResponse,
     VehicleStatus,
 )
+from app.services.line_operation_service import LineOperationConfig, line_operation_service
+from app.services.station_demo_service import StationDemoConfig, station_demo_service
 from app.services.vehicle_service import VehicleService
 from app.vehicle_sim.message_router import MessageRouter
+from app.vehicle_sim.process_manager import vehicle_process_manager
 from app.vehicle_sim.train_manager import TrainManager
 
 router = APIRouter()
@@ -130,10 +135,24 @@ def control_vehicle(command: VehicleControlRequest) -> VehicleControlResponse:
 
 @router.get("/trains", summary="List managed vehicle simulation trains")
 def list_vehicle_trains() -> dict:
-    logger.info("Vehicle trains listed: count=%s", len(vehicle_manager.trains))
+    live_by_id = {
+        item.vehicle_id: item.model_dump()
+        for item in state_store.get_snapshot().trains
+    }
+    managed_trains = vehicle_manager.list_trains()
+    if managed_trains:
+        trains = []
+        for managed in managed_trains:
+            vehicle_id = str(managed.get("vehicle_id"))
+            live = live_by_id.get(vehicle_id, {})
+            trains.append({**managed, **live})
+    else:
+        trains = list(live_by_id.values())
+    trains = vehicle_process_manager.enrich_trains(trains)
+    logger.info("Vehicle trains listed: count=%s", len(trains))
     return {
-        "count": len(vehicle_manager.trains),
-        "trains": vehicle_manager.list_trains(),
+        "count": len(trains),
+        "trains": trains,
     }
 
 
@@ -197,7 +216,102 @@ def get_driver_desk(vehicle_id: str) -> DriverDeskResponse:
 
 
 @router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
-def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
+async def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
+    if command.type == "add_train" and not _is_physical_driver_train(command):
+        return await _enqueue_ato_train(command)
+    if command.type == "remove_train" and command.vehicle_id:
+        line_operation_service.forget_train(command.vehicle_id)
+    return _manage_vehicle_command(command)
+
+
+@router.post("/station-demo/start", summary="Start continuous station arrival/departure demo")
+async def start_station_demo(command: StationDemoRequest | None = None) -> dict:
+    command = command or StationDemoRequest()
+    await line_operation_service.stop()
+    return await station_demo_service.start(
+        _manage_vehicle_command,
+        StationDemoConfig(
+            station_id=command.station_id,
+            station_name=command.station_name,
+            headway_sec=command.headway_sec,
+            dwell_sec=command.dwell_sec,
+            max_active_trains=command.max_active_trains,
+            approach_distance_m=command.approach_distance_m,
+            exit_distance_m=command.exit_distance_m,
+            min_train_spacing_m=command.min_train_spacing_m,
+            cruise_speed_kmh=command.cruise_speed_kmh,
+            start_index=command.start_index,
+        ),
+    )
+
+
+@router.post("/station-demo/stop", summary="Stop continuous station demo")
+async def stop_station_demo() -> dict:
+    return await station_demo_service.stop()
+
+
+@router.get("/station-demo/status", summary="Get station demo status")
+def get_station_demo_status() -> dict:
+    return station_demo_service.status()
+
+
+@router.post("/line-operation/start", summary="Start continuous bidirectional line operation")
+async def start_line_operation(command: LineOperationRequest | None = None) -> dict:
+    command = command or LineOperationRequest()
+    await station_demo_service.stop()
+    return await line_operation_service.start(
+        _manage_vehicle_command,
+        LineOperationConfig(
+            headway_sec=command.headway_sec,
+            max_active_trains=command.max_active_trains,
+            dwell_sec=command.dwell_sec,
+            min_train_spacing_m=command.min_train_spacing_m,
+            start_index_up=command.start_index_up,
+            start_index_down=command.start_index_down,
+        ),
+    )
+
+
+@router.post("/line-operation/stop", summary="Stop continuous bidirectional line operation")
+async def stop_line_operation() -> dict:
+    return await line_operation_service.stop()
+
+
+@router.get("/line-operation/status", summary="Get continuous line operation status")
+def get_line_operation_status() -> dict:
+    return line_operation_service.status()
+
+
+async def _enqueue_ato_train(command: VehicleManagementRequest) -> VehicleManagementResponse:
+    await station_demo_service.stop()
+    if not line_operation_service.active:
+        await line_operation_service.start(_manage_vehicle_command)
+
+    result = line_operation_service.enqueue_train(
+        vehicle_id=command.vehicle_id,
+        train_index=command.train_index,
+    )
+    trains = vehicle_process_manager.enrich_trains(vehicle_manager.list_trains())
+    state_store.replace_trains(trains, prune_absent=True)
+    return VehicleManagementResponse(
+        ok=bool(result.get("ok", False)),
+        published=not bool(result.get("queued", False)),
+        topic="add_train",
+        result={
+            **result,
+            "control_policy": "non_001_added_to_onboard_ato_queue",
+        },
+        trains=trains,
+    )
+
+
+def _is_physical_driver_train(command: VehicleManagementRequest) -> bool:
+    if command.vehicle_id is not None:
+        return str(command.vehicle_id).upper() == "TRAIN-001"
+    return command.train_index == 1
+
+
+def _manage_vehicle_command(command: VehicleManagementRequest) -> VehicleManagementResponse:
     message = _build_vehicle_management_message(command)
     result = vehicle_message_router.handle(message)
     if result is None:
@@ -205,8 +319,12 @@ def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementRespon
 
     topic = command.type
     published = publish_module_message(topic, _management_publish_payload(message))
-    trains = vehicle_manager.list_trains()
-    state_store.replace_trains(trains)
+    process_result = _sync_vehicle_processes(command, result)
+    if process_result:
+        result = {**result, "process": process_result}
+
+    trains = vehicle_process_manager.enrich_trains(vehicle_manager.list_trains())
+    state_store.replace_trains(trains, prune_absent=True)
 
     logger.info(
         "Vehicle management: type=%s vehicle_id=%s train_index=%s ok=%s published=%s active_trains=%s",
@@ -332,3 +450,43 @@ def _build_vehicle_management_message(command: VehicleManagementRequest) -> dict
         }
 
     return {"type": command.type}
+
+
+def _sync_vehicle_processes(command: VehicleManagementRequest, result: dict) -> dict | None:
+    if not result.get("ok"):
+        return None
+
+    if command.type == "add_train":
+        vehicle_id = result.get("vehicle_id") or command.vehicle_id
+        train_index = result.get("train_index") or command.train_index
+        if not vehicle_id or not train_index:
+            return {"started": False, "reason": "missing_vehicle_id_or_train_index"}
+        return vehicle_process_manager.start_train(
+            vehicle_id=str(vehicle_id),
+            train_index=int(train_index),
+            initial_position=float(result.get("position", command.position)),
+        )
+
+    if command.type == "remove_train":
+        vehicle_id = result.get("vehicle_id") or command.vehicle_id
+        if vehicle_id:
+            return vehicle_process_manager.stop_train(str(vehicle_id))
+        return {"stopped": False, "reason": "missing_vehicle_id"}
+
+    if command.type == "clear_trains":
+        return vehicle_process_manager.stop_all()
+
+    if command.type == "reset_trains":
+        stop_result = vehicle_process_manager.stop_all()
+        start_results = []
+        for train in vehicle_manager.list_trains():
+            start_results.append(
+                vehicle_process_manager.start_train(
+                    vehicle_id=str(train["vehicle_id"]),
+                    train_index=int(train["train_index"]),
+                    initial_position=float(train.get("position", 0.0)),
+                )
+            )
+        return {"reset": True, "stop": stop_result, "start": start_results}
+
+    return None

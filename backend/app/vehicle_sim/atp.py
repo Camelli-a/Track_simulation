@@ -477,7 +477,8 @@ def _distance_to_authority(
     if target_distance_m is not None:
         return float(target_distance_m)
     if ma_limit is not None:
-        return float(ma_limit) - state.position
+        direction_sign = -1 if int(getattr(state, "direction_code", 1) or 1) < 0 else 1
+        return (float(ma_limit) - state.position) * direction_sign
     return None
 
 

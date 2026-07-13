@@ -50,24 +50,24 @@ class MovementAuthorityLimit(BaseModel):
     reason: str
     front_vehicle_id: Optional[str] = None
     front_train_length: Optional[float] = None
-    location_uncertainty: float
-    communication_margin: float
-    safety_margin: float
+    location_uncertainty: float = 0.0
+    communication_margin: float = 0.0
+    safety_margin: float = 0.0
     front_protection_point: Optional[float] = None
-    safe_distance: float
-    current_speed: float
-    route_speed_limit: float
+    safe_distance: float = 0.0
+    current_speed: float = 0.0
+    route_speed_limit: float = 0.0
     static_speed_limit: Optional[float] = None
     static_speed_limit_id: Optional[str] = None
     static_speed_limit_source: Optional[str] = None
     static_speed_limit_related_switch_id: Optional[str] = None
     fault_speed_limit: Optional[float] = None
     speed_limit_reason: Optional[str] = None
-    required_stop_distance: float
-    emergency_stop_distance: float
-    warning_distance: float
-    braking_curve_speed_limit: float
-    braking_model: str
+    required_stop_distance: float = 0.0
+    emergency_stop_distance: float = 0.0
+    warning_distance: float = 0.0
+    braking_curve_speed_limit: float = 0.0
+    braking_model: str = "unknown"
 
 
 class RouteResult(BaseModel):

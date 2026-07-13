@@ -4,7 +4,7 @@ import pytest
 
 from app.communication.message_bus import decode_bus_frame, encode_bus_frame
 from app.communication.plc_feedback_aggregator import PlcFeedbackAggregator
-from app.vehicle_sim.zmq_bus import normalize_message
+from app.vehicle_sim.zmq_bus import DEFAULT_TOPICS, normalize_message
 
 
 def test_wrapped_zmq_message_is_unwrapped_at_vehicle_boundary():
@@ -23,6 +23,11 @@ def test_wrapped_zmq_message_is_unwrapped_at_vehicle_boundary():
     assert normalized["type"] == "driver_input"
     assert normalized["timestamp"] == 123.0
     assert normalized["vehicle_id"] == "TRAIN-001"
+
+
+def test_vehicle_subscriber_uses_onboard_ato_state_topic_not_fallback():
+    assert "set_train_state" in DEFAULT_TOPICS
+    assert "enable_fallback_ato" not in DEFAULT_TOPICS
 
 
 def test_message_bus_uses_single_prefixed_json_frame():

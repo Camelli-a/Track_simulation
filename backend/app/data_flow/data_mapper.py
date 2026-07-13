@@ -143,6 +143,8 @@ ATO_COMMAND_FIELD_MAPPING = {
     "train_id": "vehicle_id",
     "vehicleId": "vehicle_id",
     "lineId": "line_id",
+    "controlMode": "control_mode",
+    "control_mode": "control_mode",
     "targetSpeed": "target_speed",
     "targetVelocity": "target_speed",
     "targetSpeedKmh": "target_speed",
@@ -156,6 +158,11 @@ MA_FIELD_MAPPING = {
     "id": "vehicle_id",
     "train_id": "vehicle_id",
     "vehicleId": "vehicle_id",
+    "stationId": "station_id",
+    "stationName": "station_name",
+    "stationYardSectionId": "station_yard_section_id",
+    "stationYardTrackId": "station_yard_track_id",
+    "stationYardRouteSectionIds": "station_yard_route_section_ids",
     "routeId": "route_id",
     "maLimit": "ma_limit",
     "maLimitCm": "ma_limit",
@@ -356,6 +363,13 @@ def normalize_ato_command(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized = normalize_fields(data, ATO_COMMAND_FIELD_MAPPING)
     if "targetSpeedMps" in data:
         _set_converted(normalized, "target_speed", data["targetSpeedMps"], 3.6)
+    normalized["control_mode"] = str(normalized.get("control_mode") or "ato").strip().lower()
+    if normalized["control_mode"] != "ato":
+        normalized["control_mode"] = "ato"
+    if "traction_level" in normalized:
+        normalized["traction_level"] = max(0, min(int(normalized["traction_level"]), 4))
+    if "brake_level" in normalized:
+        normalized["brake_level"] = max(0, min(int(normalized["brake_level"]), 7))
     return normalized
 
 
@@ -408,6 +422,15 @@ def normalize_switch(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized = normalize_fields(data, SWITCH_FIELD_MAPPING)
     route_state = normalized.get("routing") or normalized.get("state") or normalized.get("position")
     if route_state:
+        route_state = str(route_state).strip().lower()
+        if route_state in {"locked_normal", "normal_locked"}:
+            route_state = "normal"
+            normalized["locked"] = True
+        elif route_state in {"locked_reverse", "reverse_locked"}:
+            route_state = "reverse"
+            normalized["locked"] = True
+        elif route_state not in {"normal", "reverse", "unknown"}:
+            route_state = "unknown"
         normalized["position"] = route_state
         normalized["routing"] = route_state
         normalized["state"] = route_state

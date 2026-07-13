@@ -455,6 +455,7 @@ def test_signal_zmq_adapter_caches_train_state_with_default_route_id():
         "position": 300.0,
         "speed": 40.0,
         "route_id": "R_MAIN",
+        "direction_code": 1,
     }
 
 
@@ -475,7 +476,6 @@ def test_signal_zmq_adapter_publishes_signal_state_and_ma_state_without_wrapping
 
     topics = [topic for topic, _ in fake_bus.published]
     assert topics == ["signal_state", "ma_state", "ato_command"]
-
     signal_data = fake_bus.published[0][1]
     ma_data = fake_bus.published[1][1]
     ato_data = fake_bus.published[2][1]
@@ -488,3 +488,73 @@ def test_signal_zmq_adapter_publishes_signal_state_and_ma_state_without_wrapping
     assert {"system_mode", "signals", "sections", "switches", "route_results"} <= set(signal_data)
     assert set(ma_data) == {"ma_limits"}
     assert set(ato_data) == {"commands"}
+
+
+def test_demo_route_uses_dynamic_forward_ma_in_absolute_yard_coordinates():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-DEMO",
+                "position": 37608.3,
+                "speed": 0.0,
+                "route_id": "DEMO-ST-13",
+                "train_length": 118.0,
+            }
+        ]
+    )
+
+    ma = snapshot["ma_limits"][0]
+    assert ma["vehicle_id"] == "TRAIN-DEMO"
+    assert ma["route_id"] == "DEMO-ST-13"
+    assert ma["ma_limit"] > 37608.3
+    assert ma["distance_to_ma"] > 0
+    assert ma["permission"] != "stop"
+
+
+def test_reverse_direction_ma_uses_lower_route_boundary_and_left_front_vehicle():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-DOWN-REAR",
+                "position": 1000.0,
+                "speed": 20.0,
+                "route_id": "LINE-DOWN",
+                "direction_code": -1,
+                "train_length": 118.0,
+            },
+            {
+                "vehicle_id": "TRAIN-DOWN-FRONT",
+                "position": 700.0,
+                "speed": 20.0,
+                "route_id": "LINE-DOWN",
+                "direction_code": -1,
+                "train_length": 118.0,
+            },
+        ]
+    )
+
+    ma = _ma_for(snapshot, "TRAIN-DOWN-REAR")
+    assert ma["front_vehicle_id"] == "TRAIN-DOWN-FRONT"
+    assert ma["front_protection_point"] == 863.0
+    assert ma["ma_limit"] == 863.0
+    assert ma["distance_to_ma"] == 137.0
+    assert ma["direction"] == "reverse"
+
+
+def test_reverse_direction_without_front_vehicle_uses_line_start_as_ma_boundary():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-DOWN",
+                "position": 1200.0,
+                "speed": 20.0,
+                "route_id": "LINE-DOWN",
+                "direction_code": -1,
+            },
+        ]
+    )
+
+    ma = _ma_for(snapshot, "TRAIN-DOWN")
+    assert ma["front_vehicle_id"] is None
+    assert ma["ma_limit"] == 0.0
+    assert ma["distance_to_ma"] == 1200.0

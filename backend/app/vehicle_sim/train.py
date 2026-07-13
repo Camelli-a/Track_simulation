@@ -37,6 +37,7 @@ class Train:
         self.state = TrainState(
             vehicle_id=vehicle_id,
             line_id=line_id,
+            route_id="R_MAIN",
             position=0.0,
             speed_ms=0.0,
             acceleration=0.0,
@@ -600,6 +601,12 @@ class Train:
             self.state.mode = "emergency"
             selected_source = "emergency_button"
             self.emergency_source = "emergency_button"
+        elif self._can_release_am_atp_emergency():
+            self.state.emergency_brake = False
+            self.emergency_source = None
+            self.atp_intervened = False
+            self.state.mode = "ato"
+            selected_source = "ato"
         elif self.state.emergency_brake:
             traction_level = 0
             brake_level = 4
@@ -630,7 +637,7 @@ class Train:
         self.distance_to_stop_m = (
             None
             if self.stop_target_m is None
-            else self.stop_target_m - self.state.position
+            else self._signed_distance_m(self.stop_target_m)
         )
         self._maybe_generate_stop_result()
         self._maybe_adapt_brake_bias_from_stop_result()
@@ -639,6 +646,20 @@ class Train:
         self._sync_control_state_to_train_state()
         self._sync_public_state()
         self._clear_transient_events()
+
+    def _can_release_am_atp_emergency(self) -> bool:
+        if not self.state.emergency_brake:
+            return False
+        if self.driving_mode != "AM":
+            return False
+        if self.emergency_source not in {None, "atp"}:
+            return False
+        if self.external_emergency_fault or self.manual_emergency_requested:
+            return False
+        if self.state.speed_ms > max(self.door_stop_speed_ms, 0.2):
+            return False
+        ma_result = self.validate_ma()
+        return ma_result.valid and ma_result.traction_permitted
 
     def _update_ato_recommendation(self, dt: float) -> None:
         stop_target_m = self._resolve_stop_target_m()
@@ -876,10 +897,21 @@ class Train:
             if feedback is not None and commanded != feedback
         }
 
-    def enable_fallback_ato(self, target_position: float):
+    def enable_fallback_ato(self, target_position: float, target_speed_kmh: float | None = None):
         from .controllers.fallback_ato import FallbackAtoController
 
-        self.fallback_ato = FallbackAtoController(target_position)
+        target_position = float(target_position)
+        self.fallback_ato = FallbackAtoController(
+            target_position,
+            target_speed_kmh=30.0 if target_speed_kmh is None else float(target_speed_kmh),
+        )
+        self.next_stop_target_m = target_position
+        self.stop_target_m = target_position
+        self.distance_to_stop_m = self._signed_distance_m(target_position)
+        if self.state.emergency_brake and self.distance_to_stop_m > 0.0:
+            self.state.emergency_brake = False
+            self.emergency_source = None
+            self.atp_intervened = False
         if not self.state.emergency_brake:
             self.state.mode = "ato"
 
@@ -1142,14 +1174,14 @@ class Train:
     def _build_curve_point(self) -> dict:
         distance_to_ma_m = None
         if self.ma_limit is not None:
-            distance_to_ma_m = self.ma_limit - self.state.position
+            distance_to_ma_m = self._signed_distance_m(self.ma_limit)
 
         stop_target_m = self.stop_target_m
         if stop_target_m is None:
             stop_target_m = self.next_stop_target_m
         distance_to_stop_m = None
         if stop_target_m is not None:
-            distance_to_stop_m = stop_target_m - self.state.position
+            distance_to_stop_m = self._signed_distance_m(stop_target_m)
 
         degraded = None
         if self.last_ato_output is not None:
@@ -1286,6 +1318,11 @@ class Train:
         self.state.curve_output_enabled = self.curve_output_enabled
         self.state.curve_history_size = self.curve_history_size
         self.state.curve_point = self.last_curve_point
+
+    def _signed_distance_m(self, target_position_m: float) -> float:
+        direction_sign = -1 if int(self.state.direction_code) < 0 else 1
+        return (float(target_position_m) - float(self.state.position)) * direction_sign
+
     def _effective_external_allowed_speed(self) -> float | None:
         candidates = [
             value

@@ -133,6 +133,23 @@ def test_am_brakes_when_approaching_stop_target_too_fast():
     assert output.traction_level == 0
 
 
+def test_am_speed_limit_guard_brakes_before_atp_emergency():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            speed_ms=11.0,
+            allowed_speed_kmh=27.972,
+            ma_limit_m=16000.0,
+            stop_target_m=14000.0,
+        )
+    )
+
+    assert output.traction_level == 0
+    assert output.brake_level > 0
+    assert output.degraded is False
+
+
 def test_low_speed_target_decreases_with_distance():
     controller = _controller()
 
@@ -964,3 +981,43 @@ def test_evaluate_stop_result_classifies_window_and_errors():
     )
     assert not_stopped.status == "not_stopped"
     assert not_stopped.qualified is False
+
+
+def test_reverse_am_uses_lower_stop_target_as_forward_distance():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=1800.0,
+            speed_ms=8.0,
+            ma_limit_m=1000.0,
+            stop_target_m=1500.0,
+            direction=-1,
+            allowed_speed_kmh=60.0,
+        )
+    )
+
+    assert output.degraded is False
+    assert output.distance_to_stop_m == pytest.approx(300.0)
+    assert output.distance_to_ma_m == pytest.approx(800.0)
+    assert output.effective_target_m == 1500.0
+    assert output.reason == "normal"
+
+
+def test_reverse_am_rejects_stop_target_beyond_ma_in_travel_direction():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=1800.0,
+            speed_ms=8.0,
+            ma_limit_m=1200.0,
+            stop_target_m=1000.0,
+            direction=-1,
+            allowed_speed_kmh=60.0,
+        )
+    )
+
+    assert output.degraded is False
+    assert output.effective_target_m == 1200.0
+    assert output.reason == "stop_target_beyond_ma"

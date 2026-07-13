@@ -2,15 +2,11 @@
   <div class="app-panel" :class="selected ? 'border-sky-800/70 bg-sky-950/16' : ''">
     <div class="app-section-head">
       <div>
-        <p class="app-section-kicker">
-          当前关注列车
-        </p>
+        <p class="app-section-kicker">当前关注列车</p>
         <h3 class="mt-2 text-lg font-semibold text-white">
           {{ selected ? selected.vehicle_id : '尚未选中列车' }}
         </h3>
-        <p class="app-section-copy">
-          {{ description }}
-        </p>
+        <p class="app-section-copy">{{ description }}</p>
       </div>
 
       <span
@@ -25,11 +21,11 @@
     <div v-if="selected" class="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="app-metric-tile">
         <p class="app-metric-label">位置</p>
-        <p class="mt-1 text-sm font-medium text-gray-100">{{ Math.round(selected.position) }} m</p>
+        <p class="mt-1 text-sm font-medium text-gray-100">{{ positionText }}</p>
       </div>
       <div class="app-metric-tile">
         <p class="app-metric-label">速度</p>
-        <p class="mt-1 text-sm font-medium text-gray-100">{{ Math.round(selected.speed) }} km/h</p>
+        <p class="mt-1 text-sm font-medium text-gray-100">{{ speedText }}</p>
       </div>
       <div class="app-metric-tile">
         <p class="app-metric-label">MA 剩余</p>
@@ -39,13 +35,16 @@
       </div>
       <div class="app-metric-tile">
         <p class="app-metric-label">状态</p>
-        <p class="mt-1 text-sm font-medium" :class="selected.emergency_brake ? 'text-red-300' : 'text-emerald-300'">
-          {{ selected.emergency_brake ? '紧急制动中' : '运行中' }}
+        <p class="mt-1 text-sm font-medium" :class="selected.emergency_brake || selected.atp_intervention ? 'text-red-300' : 'text-emerald-300'">
+          {{ selected.emergency_brake || selected.atp_intervention ? 'ATP / 紧急制动' : '运行中' }}
         </p>
       </div>
     </div>
 
-    <div v-if="selected && insight" class="mt-5 rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-gray-300">
+    <div
+      v-if="selected && insight"
+      class="mt-5 rounded-[1rem] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-gray-300"
+    >
       {{ insight }}
     </div>
   </div>
@@ -58,7 +57,10 @@ import { modeLabel } from '@/adapters/simulation'
 const props = defineProps({
   vehicle: { type: Object, default: null },
   color: { type: Function, required: true },
-  description: { type: String, default: '点击沙盘、时间线或其他页面中的列车后，这里会同步显示它的关键状态。' },
+  description: {
+    type: String,
+    default: '点击沙盘、时间线或其他页面中的列车后，这里会同步显示它的关键状态。',
+  },
   insight: { type: String, default: '' },
 })
 
@@ -76,9 +78,21 @@ const badgeStyle = computed(() => {
   }
 })
 
+const positionText = computed(() => {
+  if (!selected.value) return '—'
+  return `${Math.round(selected.value.position ?? 0)} m`
+})
+
+const speedText = computed(() => {
+  if (!selected.value) return '—'
+  return `${Math.round(selected.value.speed ?? selected.value.speed_kmh ?? 0)} km/h`
+})
+
 const maRemaining = computed(() => {
-  if (!selected.value || selected.value.ma_limit == null) return null
-  return selected.value.ma_limit - selected.value.position
+  if (!selected.value) return null
+  if (selected.value.distance_to_ma != null) return selected.value.distance_to_ma
+  if (selected.value.ma_limit == null) return null
+  return selected.value.ma_limit - (selected.value.position ?? 0)
 })
 
 const maRemainingText = computed(() => {

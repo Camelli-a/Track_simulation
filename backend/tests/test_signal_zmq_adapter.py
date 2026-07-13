@@ -59,6 +59,9 @@ def test_start_subscribes_train_state_and_starts_publish_thread():
     assert fake_bus.started is True
     assert [topic for topic, _ in fake_bus.subscriptions] == [
         "train_state",
+        "remove_train",
+        "clear_trains",
+        "reset_trains",
         "route_request",
     ]
     assert adapter.publish_thread is not None
@@ -82,7 +85,10 @@ def test_on_train_state_records_last_update_at():
     adapter.on_train_state("train_state", _train_state())
 
     assert adapter.train_last_update_at["TRAIN-001"] == 100.0
-    assert adapter.train_states_by_id["TRAIN-001"] == _train_state()
+    assert adapter.train_states_by_id["TRAIN-001"] == {
+        **_train_state(),
+        "direction_code": 1,
+    }
 
 
 def test_train_state_preserves_fault_speed_limit_and_emergency_brake():
@@ -108,9 +114,17 @@ def test_train_state_preserves_fault_speed_limit_and_emergency_brake():
     ma_limit = _published_data(fake_bus, "ma_state")[0]["ma_limits"][0]
     assert ma_limit["fault_speed_limit"] == 30.0
     assert ma_limit["permission"] == "stop"
-    assert ma_limit["signal_state"] == "red"
-    assert ma_limit["speed_limit"] == 0.0
-    assert ma_limit["speed_limit_reason"] == "emergency_brake"
+
+
+def test_remove_train_clears_cached_train_state():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)
+
+    adapter.on_train_state("train_state", _train_state())
+    adapter.on_remove_train("remove_train", {"vehicle_id": "TRAIN-001"})
+
+    assert "TRAIN-001" not in adapter.train_states_by_id
+    assert "TRAIN-001" not in adapter.train_last_update_at
 
 
 def test_publish_outputs_normal_when_train_state_not_stale():

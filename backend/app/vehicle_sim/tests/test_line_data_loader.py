@@ -25,6 +25,14 @@ def test_line_layout_loader_exposes_stop_positions_from_platform_data():
     assert all(position > 0 for position in stop_positions)
 
 
+def test_line_layout_loader_normalizes_raw_gradient_tenths_permille():
+    sections = build_track_sections(load_line_layout())
+    section = next(item for item in sections if item.section_id == "3G-D")
+
+    assert section.gradient == 30.0
+    assert all(abs(item.gradient) <= 60.0 for item in sections)
+
+
 def test_track_map_from_line_layout_uses_real_sections():
     track = build_track_map_from_line_layout()
 

@@ -90,6 +90,22 @@ def test_emergency_braking_curve_applies_eb_near_ma():
     assert decision.distance_to_authority_m == 30.0
 
 
+def test_reverse_direction_ma_distance_uses_direction_code():
+    state = _state(speed_ms=5.0, position=16000.0)
+    state.direction_code = -1
+
+    decision = evaluate_atp(
+        state=state,
+        speed_limit=80.0,
+        ma_limit=0.0,
+        power_fault=False,
+        comm_ok=True,
+    )
+
+    assert decision.emergency_brake is False
+    assert decision.distance_to_authority_m == 16000.0
+
+
 def test_service_braking_curve_warns_before_emergency_curve():
     decision = evaluate_atp(
         state=_state(speed_ms=10.0, position=100.0),

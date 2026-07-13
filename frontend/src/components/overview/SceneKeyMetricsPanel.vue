@@ -5,7 +5,7 @@
         <p class="app-section-kicker">Scene Metrics</p>
         <h3 class="app-section-title">场景关键指标</h3>
         <p class="app-section-copy">
-          这一块不固定写死指标，而是跟着当前场景自动切换；点车后优先展示该车对应场景的关键指标。
+          指标来自后端实时快照，不再使用固定演示值；选中车辆后优先展示该车的速度、MA、ATO/ATP 和停车数据。
         </p>
       </div>
       <span class="app-chip">{{ activeOverviewScene.scenario_id }}</span>
@@ -33,7 +33,7 @@
       v-else
       class="mt-4 rounded-[1.1rem] border border-dashed border-white/10 bg-black/10 px-4 py-8 text-center text-sm text-slate-500"
     >
-      当前场景还没有配置可展示的 `key_metrics`。
+      当前后端快照还没有可展示的关键指标。
     </div>
   </section>
 </template>
