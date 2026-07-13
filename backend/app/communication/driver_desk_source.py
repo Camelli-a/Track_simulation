@@ -636,7 +636,7 @@ class DriverDeskSource:
             auto_reverse_active:序号23 激活自动折返模式标志（byte25.3）
         """
         if not self._connected or self._sock is None:
-            logger.warning(f"[{self.vehicle_id}] send_to_plc() called but not connected")
+            logger.debug(f"[{self.vehicle_id}] send_to_plc() skipped: PLC not connected")
             return
 
         now = time.localtime()
