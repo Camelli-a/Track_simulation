@@ -1,6 +1,9 @@
 import logging
+import time
+from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from app.data_flow.message_publisher import publish_module_message
 from app.data_flow.state_store import state_store
@@ -18,6 +21,56 @@ from app.vehicle_sim.train_manager import TrainManager
 router = APIRouter()
 service = VehicleService()
 logger = logging.getLogger("uvicorn.error")
+
+
+# ---------------------------------------------------------------------------
+# Driver Desk response models (新增，不影响任何现有接口)
+# ---------------------------------------------------------------------------
+
+class DriverDeskResponse(BaseModel):
+    """司机台 PLC 下行帧解析结果，供前端司机台状态面板使用。
+    字段直接对应 data_flow.schemas.DriverInput，精简为前端关注的部分。
+    """
+    vehicle_id: str
+    source: str = "unknown"
+    # --- 方向 / 模式 ---
+    direction: str = "forward"           # forward / backward / neutral
+    control_mode: str = "manual"         # manual / ato
+    # --- 牵引制动 ---
+    traction_level: int = 0              # 0~4
+    brake_level: int = 0                 # 0~7
+    traction_percent: float = 0.0        # 0~100
+    brake_percent: float = 0.0           # 0~100
+    main_handle_raw: Optional[int] = None
+    # --- 紧急 ---
+    emergency_button: bool = False
+    emergency_cmd: bool = False
+    # --- ATO ---
+    ato_start_btn: bool = False
+    ato_capable: Optional[bool] = None
+    ato_active: Optional[bool] = None
+    auto_reverse_cap: Optional[bool] = None
+    auto_reverse_active: Optional[bool] = None
+    # --- 车门 ---
+    open_left_door: bool = False
+    open_right_door: bool = False
+    close_left_door: bool = False
+    close_right_door: bool = False
+    door_mode: Optional[str] = None
+    door_closed_light: Optional[bool] = None
+    # --- 其他指示灯 / 开关 ---
+    key_switch: Optional[bool] = None
+    high_voltage_light: Optional[bool] = None
+    brake_bad_light: Optional[bool] = None
+    network_fault_light: Optional[bool] = None
+    # --- 状态 ---
+    is_stale: bool = False
+    updated_at: float = Field(default_factory=time.time)
+
+
+class DriverDeskListResponse(BaseModel):
+    count: int
+    items: List[DriverDeskResponse]
 
 # ---------------------------------------------------------------------------
 # Singleton TrainManager + MessageRouter shared across the whole application.
@@ -82,6 +135,65 @@ def list_vehicle_trains() -> dict:
         "count": len(vehicle_manager.trains),
         "trains": vehicle_manager.list_trains(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Driver Desk endpoints — 读 state_store._driver_inputs，不写任何共享状态
+# ---------------------------------------------------------------------------
+
+def _build_driver_desk_response(driver_input) -> DriverDeskResponse:
+    """把 DriverInput schema 对象转成 DriverDeskResponse，兼容 stale 标记。"""
+    d = driver_input.model_dump()
+    # 只取 DriverDeskResponse 声明的字段，其余忽略
+    fields = DriverDeskResponse.model_fields.keys()
+    return DriverDeskResponse(**{k: d[k] for k in fields if k in d})
+
+
+@router.get(
+    "/driver-desk",
+    response_model=DriverDeskListResponse,
+    summary="[司机台] 所有车辆的司机台状态",
+    description=(
+        "返回 state_store 中缓存的所有车辆司机台输入状态。\n\n"
+        "**数据来源**：`driver_input` ZMQ topic（司机台 PLC TCP 解析后发布）。\n"
+        "**更新频率**：PLC 下行帧 100 ms/次，`is_stale=true` 表示超过 1 s 未更新。\n"
+        "**不影响任何其他接口**：本接口只读，不写 state_store。"
+    ),
+)
+def get_all_driver_desk() -> DriverDeskListResponse:
+    now = time.time()
+    stale_threshold = 1.0
+    items = []
+    with state_store._lock:
+        inputs = list(state_store._driver_inputs.values())
+    for di in inputs:
+        resp = _build_driver_desk_response(di)
+        # 实时计算 stale（比 schema 里的 is_stale 更准确）
+        resp.is_stale = (now - float(di.updated_at)) > stale_threshold
+        items.append(resp)
+    return DriverDeskListResponse(count=len(items), items=items)
+
+
+@router.get(
+    "/driver-desk/{vehicle_id}",
+    response_model=DriverDeskResponse,
+    summary="[司机台] 指定车辆的司机台状态",
+    description="按 vehicle_id 查询单辆车的司机台输入状态。找不到时返回 404。",
+)
+def get_driver_desk(vehicle_id: str) -> DriverDeskResponse:
+    now = time.time()
+    stale_threshold = 1.0
+    with state_store._lock:
+        di = state_store._driver_inputs.get(vehicle_id)
+    if di is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No driver desk data for vehicle_id={vehicle_id!r}. "
+                   "Make sure DATA_SOURCE=zmq and the PLC is connected.",
+        )
+    resp = _build_driver_desk_response(di)
+    resp.is_stale = (now - float(di.updated_at)) > stale_threshold
+    return resp
 
 
 @router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
