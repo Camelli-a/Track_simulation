@@ -35,12 +35,13 @@
               :key="station.station_id"
               type="button"
               class="group relative rounded-none border px-4 py-2 text-sm font-semibold tracking-[0.18em] transition"
+              :title="station.name"
               :class="station.station_id === selectedStationId
                 ? 'border-[#65ff65] bg-[#10240f] text-[#8dff8d] shadow-[0_0_18px_rgba(81,255,91,0.18)]'
                 : 'border-[#24352f] bg-[#07100d] text-[#6fae73] hover:border-[#4fdc5a] hover:text-[#9dff9d]'"
               @click="selectStation(station.station_id)"
             >
-              {{ station.name }}
+              {{ stationLabel(station.name) }}
               <span
                 class="absolute -bottom-[9px] left-1/2 h-2 w-px -translate-x-1/2 transition"
                 :class="station.station_id === selectedStationId ? 'bg-[#65ff65]' : 'bg-[#24352f]'"
@@ -71,6 +72,7 @@ import { computed, ref, watch } from 'vue'
 import PageEmptyState from '@/components/PageEmptyState.vue'
 import StationYardPanel from '@/components/StationYardPanel.vue'
 import { usePageSimulation } from '@/composables/usePageSimulation'
+import { stationLabel } from '@/utils/lineSchematic'
 
 const store = usePageSimulation()
 const selectedStationId = ref(null)
