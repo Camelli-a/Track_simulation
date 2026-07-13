@@ -239,6 +239,7 @@ class DashboardStateStore:
             source=settings.DATA_SOURCE if settings.DATA_SOURCE in {"mock", "udp", "zmq"} else "unknown",
             last_message_at=now,
         )
+        self._active_driver_vehicle_id: Optional[str] = "TRAIN-001"
         self._driver_inputs: Dict[str, DriverInput] = {}
         self._ato_commands: Dict[str, AtoCommandSnapshot] = {}
         self._trains: Dict[str, TrainSnapshot] = {}
@@ -256,6 +257,20 @@ class DashboardStateStore:
     def set_websocket_clients(self, count: int) -> None:
         with self._lock:
             self._websocket_clients = max(0, count)
+
+    def set_active_driver_vehicle(self, vehicle_id: Optional[str]) -> Optional[str]:
+        with self._lock:
+            normalized = str(vehicle_id).strip() if vehicle_id is not None else None
+            if normalized == "":
+                normalized = None
+            if normalized is not None and normalized not in self._trains:
+                return self._active_driver_vehicle_id
+            self._active_driver_vehicle_id = normalized
+            return self._active_driver_vehicle_id
+
+    def get_active_driver_vehicle(self) -> Optional[str]:
+        with self._lock:
+            return self._active_driver_vehicle_id
 
     def update_comm(self, data: Dict[str, Any]) -> None:
         with self._lock:
@@ -340,6 +355,9 @@ class DashboardStateStore:
         normalized.setdefault("emergency_brake", False)
         self._apply_protocol_metadata(normalized, data, time.time(), "train")
         self.update_train(str(vehicle_id), normalized)
+        with self._lock:
+            if self._active_driver_vehicle_id is None:
+                self._active_driver_vehicle_id = str(vehicle_id)
         return str(vehicle_id)
 
     def replace_trains(self, trains: Iterable[Dict[str, Any]], *, prune_absent: bool = False) -> None:
@@ -401,6 +419,8 @@ class DashboardStateStore:
                 for vehicle_id, item in self._ma_limits.items()
                 if vehicle_id in active_ids
             }
+            if self._active_driver_vehicle_id not in active_ids:
+                self._active_driver_vehicle_id = sorted(active_ids)[0] if active_ids else None
 
     def update_ma_limits(self, ma_limits: Iterable[Dict[str, Any]]) -> None:
         now = time.time()
@@ -736,6 +756,7 @@ class DashboardStateStore:
                 integration_mode="simulation" if data_source == "mock" else ("realtime" if data_source == "zmq" else "hybrid"),
                 realtime_channel="websocket",
                 driver_desk_connected=comm_status.driver_console_connected,
+                active_driver_vehicle_id=self._active_driver_vehicle_id,
                 external_connections=ExternalConnections(
                     power=not power.is_stale,
                     signal_screen=bool(signals),
