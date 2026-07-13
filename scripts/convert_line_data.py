@@ -1,6 +1,7 @@
 """Convert the teacher-provided line Excel workbook into frontend/backend seed JSON.
 
 Outputs:
+  - backend/data/line-layout.json
   - frontend/public/data/line-layout.json
 
 The JSON keeps the legacy frontend fields (`blocks`, `signals`, `turnouts`,
@@ -20,6 +21,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from station_yard import build_station_yard_layout_v2, export_station_yard_assets
+
 try:
     import pandas as pd
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised by CLI users
@@ -31,7 +34,12 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised by CLI users
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_XLS_PATH = ROOT / "backend" / "线路数据(1).xls"
-DEFAULT_OUT_PATH = ROOT / "frontend" / "public" / "data" / "line-layout.json"
+DEFAULT_OUT_PATH = ROOT / "backend" / "data" / "line-layout.json"
+DEFAULT_FRONTEND_OUT_PATH = ROOT / "frontend" / "public" / "data" / "line-layout.json"
+DEFAULT_BACKEND_YARD_OUTPUT = ROOT / "backend" / "data" / "station-yard-v2.json"
+DEFAULT_FRONTEND_YARD_OUTPUT = ROOT / "frontend" / "public" / "data" / "station-yard-v2.json"
+DEFAULT_BACKEND_YARD_SVG_DIR = ROOT / "backend" / "data" / "station-yards"
+DEFAULT_FRONTEND_YARD_SVG_DIR = ROOT / "frontend" / "public" / "data" / "station-yards"
 LINE_ID = "LINE-1"
 INVALID_ID = 65535
 
@@ -530,10 +538,17 @@ def build_turnouts(xls_path: Path, segs: dict[int, dict], graph: dict, stations:
         reverse_seg = to_int(row.get("反位SegID"))
         position = segs.get(merge_seg, {}).get("start_m", 0.0) if merge_seg else 0.0
         station_id = nearest_station_id(position, stations, max_distance_m=1200.0)
+        source_index = to_int(row.get("索引编号"))
         turnout_id = safe_name(row["名称"])
+        linked_turnout_id = to_int(row.get("联动道岔编号"))
         turnout = {
             "turnout_id": turnout_id,
             "switch_id": f"SW-{turnout_id}",
+            "switch_uid": f"SWI-{source_index}",
+            "source_index": source_index,
+            "source_direction": to_int(row.get("方向")),
+            "linked_turnout_id": None if linked_turnout_id == INVALID_ID else linked_turnout_id,
+            "lateral_speed_limit_raw": to_int(row.get("侧向静态限速")),
             "position": position,
             "position_m": position,
             "merge_seg_id": merge_seg,
@@ -1519,7 +1534,7 @@ def convert(xls_path: Path = DEFAULT_XLS_PATH) -> dict:
     }
     payload["track_info"] = build_track_info(blocks)
     payload["signal_state"] = build_signal_state(blocks, signals, turnouts)
-    payload["yard_layout"] = build_yard_layout(stations, blocks, signals, turnouts, graph)
+    payload["yard_layout"] = build_station_yard_layout_v2(payload)
     validate_payload(payload)
     return payload
 
@@ -1527,13 +1542,26 @@ def convert(xls_path: Path = DEFAULT_XLS_PATH) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert official line workbook to line-layout.json")
     parser.add_argument("--input", type=Path, default=DEFAULT_XLS_PATH, help="Source .xls/.xlsx workbook")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUT_PATH, help="Output JSON path")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUT_PATH, help="Backend output JSON path")
+    parser.add_argument(
+        "--frontend-output",
+        type=Path,
+        default=DEFAULT_FRONTEND_OUT_PATH,
+        help="Frontend fallback output JSON path",
+    )
     args = parser.parse_args()
 
     payload = convert(args.input)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Wrote {args.output}")
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+    for output_path in dict.fromkeys((args.output, args.frontend_output)):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(serialized, encoding="utf-8")
+        print(f"Wrote {output_path}")
+    export_station_yard_assets(
+        payload["yard_layout"],
+        json_paths=(DEFAULT_BACKEND_YARD_OUTPUT, DEFAULT_FRONTEND_YARD_OUTPUT),
+        svg_directories=(DEFAULT_BACKEND_YARD_SVG_DIR, DEFAULT_FRONTEND_YARD_SVG_DIR),
+    )
     print(
         "total={total}m stations={stations} platforms={platforms} blocks={blocks} "
         "signals={signals} turnouts={turnouts} graph_edges={placed}/{total_edges} "
