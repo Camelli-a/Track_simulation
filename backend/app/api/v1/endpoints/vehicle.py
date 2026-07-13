@@ -215,6 +215,270 @@ def get_driver_desk(vehicle_id: str) -> DriverDeskResponse:
     return resp
 
 
+# ---------------------------------------------------------------------------
+# Trip Status endpoints — 行驶状态（只读，不写任何共享状态）
+# GET /api/v1/vehicle/trip-status           → 所有车辆
+# GET /api/v1/vehicle/trip-status/:id       → 单辆车
+# ---------------------------------------------------------------------------
+
+class TripStatusResponse(BaseModel):
+    """列车行驶区间状态，供前端 TripStatusPanel 使用。"""
+    vehicle_id: str
+    # --- 方向 ---
+    direction: str = "forward"          # forward / reverse / neutral
+    # --- 当前位置 ---
+    current_position_m: float = 0.0
+    speed_kmh: float = 0.0
+    is_stopped: bool = False
+    # --- 站点信息 ---
+    from_station_id: Optional[str] = None
+    from_station: Optional[str] = None  # 出发站名
+    to_station_id: Optional[str] = None
+    to_station: Optional[str] = None    # 下一站名（MA 目标站）
+    # --- 距离 ---
+    distance_to_next_m: Optional[float] = None   # 距下一站剩余距离
+    segment_length_m: Optional[float] = None     # 区间全长
+    traveled_m: Optional[float] = None           # 区间内已行驶距离
+    # --- 数据来源标注 ---
+    distance_source: str = "none"       # "ma" / "stop_target" / "inferred" / "none"
+    is_stale: bool = False
+    updated_at: float = Field(default_factory=time.time)
+
+
+class TripStatusListResponse(BaseModel):
+    count: int
+    items: List[TripStatusResponse]
+
+
+def _load_station_list() -> list[dict]:
+    """从 line-layout.json 读取站点列表，失败时返回空列表（不影响主流程）。"""
+    try:
+        from app.vehicle_sim.line_data_loader import load_line_layout
+        layout = load_line_layout()
+        stations: dict[str, dict] = {}
+
+        # 从 track_info.sections / blocks 中收集站点停车位置
+        sections = (
+            layout.get("track_info", {}).get("sections")
+            or layout.get("blocks")
+            or []
+        )
+        for sec in sections:
+            sid = sec.get("station_id")
+            if not sid:
+                continue
+            stop_pos = sec.get("stop_position")
+            start = float(sec.get("start", 0))
+            end = float(sec.get("end", start))
+            pos = float(stop_pos) if stop_pos else (start + end) / 2.0
+            if sid not in stations:
+                stations[sid] = {"station_id": sid, "name": sid, "position": pos}
+            else:
+                # 取更小值（更靠近行程起点）作为代表位置
+                stations[sid]["position"] = min(stations[sid]["position"], pos)
+
+        # 补充站名（来自 yard_layout）
+        yard_stations = (
+            layout.get("yard_layout", {}).get("stations")
+            or []
+        )
+        for ys in yard_stations:
+            sid = ys.get("station_id")
+            if sid and sid in stations:
+                stations[sid]["name"] = ys.get("station_name") or sid
+
+        return sorted(stations.values(), key=lambda s: s["position"])
+    except Exception:
+        return []
+
+
+# 模块级缓存，避免每次请求都读文件
+_STATION_LIST: list[dict] | None = None
+
+
+def _get_station_list() -> list[dict]:
+    global _STATION_LIST
+    if _STATION_LIST is None:
+        _STATION_LIST = _load_station_list()
+    return _STATION_LIST
+
+
+def _build_trip_status(train, ma) -> TripStatusResponse:
+    """
+    从 TrainSnapshot + MovementAuthoritySnapshot 组装行驶状态。
+
+    出发站：已经过去的最近一站（按列车 position 和行驶方向判断）。
+    下一站：MA 目标站 > ATO stop_target 最近站 > 前方最近站，按优先级取第一个有效值。
+    距离：MA 的 distance_to_ma > train.distance_to_stop > 自算，按优先级取第一个有效值。
+    """
+    now = time.time()
+    stale_threshold = 2.0
+
+    position = float(train.position or 0.0)
+    speed_kmh = float(train.speed or train.speed_kmh or 0.0)
+    is_stopped = speed_kmh < 0.5
+
+    # 行驶方向归一化
+    raw_dir = train.direction  # 可能是 int(1/-1) 或 str
+    if raw_dir in (-1, 2, "reverse", "backward", "down"):
+        direction = "reverse"
+    elif raw_dir in (0, "neutral"):
+        direction = "neutral"
+    else:
+        direction = "forward"
+
+    direction_sign = -1 if direction == "reverse" else 1
+
+    stations = _get_station_list()
+
+    # ── 推断出发站（列车已经过去的最近一站）──────────────────────────
+    from_station_id: Optional[str] = None
+    from_station_name: Optional[str] = None
+    from_station_pos: Optional[float] = None
+
+    if stations:
+        if direction_sign >= 0:
+            # 正向：找 position 最大且 <= 当前位置 的站
+            passed = [s for s in stations if s["position"] <= position]
+            if passed:
+                best = passed[-1]
+                from_station_id = best["station_id"]
+                from_station_name = best["name"]
+                from_station_pos = best["position"]
+        else:
+            # 反向：找 position 最小且 >= 当前位置 的站
+            passed = [s for s in stations if s["position"] >= position]
+            if passed:
+                best = passed[0]
+                from_station_id = best["station_id"]
+                from_station_name = best["name"]
+                from_station_pos = best["position"]
+
+    # ── 推断下一站 ────────────────────────────────────────────────────
+    to_station_id: Optional[str] = None
+    to_station_name: Optional[str] = None
+    to_station_pos: Optional[float] = None
+
+    # 优先：MA 携带的目标站名
+    if ma and ma.station_name:
+        to_station_name = ma.station_name
+        to_station_id = ma.station_id
+        # 尝试从 station_list 中找到对应位置
+        if stations and to_station_id:
+            match = next((s for s in stations if s["station_id"] == to_station_id), None)
+            if match:
+                to_station_pos = match["position"]
+
+    # 次优：从站点列表推断前方最近一站
+    if to_station_name is None and stations:
+        if direction_sign >= 0:
+            ahead = [s for s in stations if s["position"] > position]
+            if ahead:
+                best = ahead[0]
+                to_station_id = best["station_id"]
+                to_station_name = best["name"]
+                to_station_pos = best["position"]
+        else:
+            ahead = [s for s in stations if s["position"] < position]
+            if ahead:
+                best = ahead[-1]
+                to_station_id = best["station_id"]
+                to_station_name = best["name"]
+                to_station_pos = best["position"]
+
+    # ── 距下一站距离 ──────────────────────────────────────────────────
+    distance_to_next: Optional[float] = None
+    distance_source = "none"
+
+    # 优先 MA distance_to_ma
+    if ma and ma.distance_to_ma is not None:
+        distance_to_next = float(ma.distance_to_ma)
+        distance_source = "ma"
+    # 次优 train.distance_to_stop（ATO stop_target 距离）
+    elif train.distance_to_stop is not None:
+        distance_to_next = float(train.distance_to_stop)
+        distance_source = "stop_target"
+    # 再次 train.stop_distance（由 MA 覆写到 train 上的值）
+    elif train.stop_distance is not None:
+        distance_to_next = float(train.stop_distance)
+        distance_source = "stop_target"
+    # 最后用站点坐标自算
+    elif to_station_pos is not None:
+        distance_to_next = abs(to_station_pos - position)
+        distance_source = "inferred"
+
+    if distance_to_next is not None:
+        distance_to_next = max(0.0, round(distance_to_next, 1))
+
+    # ── 区间信息（用于进度条） ────────────────────────────────────────
+    segment_length: Optional[float] = None
+    traveled: Optional[float] = None
+
+    if from_station_pos is not None and to_station_pos is not None:
+        segment_length = round(abs(to_station_pos - from_station_pos), 1)
+        traveled = round(abs(position - from_station_pos), 1)
+
+    # ── stale 判断 ────────────────────────────────────────────────────
+    is_stale = (now - float(train.updated_at)) > stale_threshold
+
+    return TripStatusResponse(
+        vehicle_id=train.vehicle_id,
+        direction=direction,
+        current_position_m=round(position, 1),
+        speed_kmh=round(speed_kmh, 1),
+        is_stopped=is_stopped,
+        from_station_id=from_station_id,
+        from_station=from_station_name,
+        to_station_id=to_station_id,
+        to_station=to_station_name,
+        distance_to_next_m=distance_to_next,
+        segment_length_m=segment_length,
+        traveled_m=traveled,
+        distance_source=distance_source,
+        is_stale=is_stale,
+        updated_at=float(train.updated_at),
+    )
+
+
+@router.get(
+    "/trip-status",
+    response_model=TripStatusListResponse,
+    summary="[行驶状态] 所有车辆的区间行驶状态",
+    description=(
+        "返回所有车辆的区间行驶状态：出发站、下一站、剩余距离。\n\n"
+        "**数据来源**：state_store 中的 TrainSnapshot + MovementAuthoritySnapshot。\n"
+        "**只读接口**：不写 state_store，不影响任何其他逻辑。"
+    ),
+)
+def get_all_trip_status() -> TripStatusListResponse:
+    snapshot = state_store.get_snapshot()
+    ma_by_id = {ma.vehicle_id: ma for ma in snapshot.ma_limits}
+    items = [
+        _build_trip_status(train, ma_by_id.get(train.vehicle_id))
+        for train in snapshot.trains
+    ]
+    return TripStatusListResponse(count=len(items), items=items)
+
+
+@router.get(
+    "/trip-status/{vehicle_id}",
+    response_model=TripStatusResponse,
+    summary="[行驶状态] 指定车辆的区间行驶状态",
+    description="按 vehicle_id 查询单辆车的行驶状态。找不到时返回 404。",
+)
+def get_trip_status(vehicle_id: str) -> TripStatusResponse:
+    snapshot = state_store.get_snapshot()
+    train = next((t for t in snapshot.trains if t.vehicle_id == vehicle_id), None)
+    if train is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No trip status data for vehicle_id={vehicle_id!r}. "
+                   "Make sure the vehicle is registered and DATA_SOURCE=zmq.",
+        )
+    ma_by_id = {ma.vehicle_id: ma for ma in snapshot.ma_limits}
+    return _build_trip_status(train, ma_by_id.get(vehicle_id))
+
+
 @router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
 async def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
     if command.type == "add_train" and not _is_physical_driver_train(command):

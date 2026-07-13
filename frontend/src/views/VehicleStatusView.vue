@@ -31,8 +31,14 @@
     <!-- 速度曲线 -->
     <SpeedCurvePanel />
 
-    <!-- 司机台状态：vehicleId 为 null 时组件内部取第一条 -->
-    <DriverDeskPanel :vehicle-id="selectedVehicleId" />
+    <!-- 司机台状态 + 行驶状态并列 -->
+    <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <!-- 司机台状态：vehicleId 为 null 时组件内部取第一条 -->
+      <DriverDeskPanel :vehicle-id="selectedVehicleId" />
+
+      <!-- 行驶状态：从/到哪一站，距下一站距离 -->
+      <TripStatusPanel :vehicle-id="selectedVehicleId" />
+    </div>
   </div>
 </template>
 
@@ -40,6 +46,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import SpeedCurvePanel from '@/components/vehicle/SpeedCurvePanel.vue'
 import DriverDeskPanel from '@/components/vehicle/DriverDeskPanel.vue'
+import TripStatusPanel from '@/components/vehicle/TripStatusPanel.vue'
 import { useSpeedCurveStore } from '@/stores/speedCurve'
 import { useSimulationStore } from '@/stores/simulation'
 
