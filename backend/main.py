@@ -119,7 +119,13 @@ async def lifespan(app: FastAPI):
     )
     plc_aggregator.attach(bus)
 
-    # Route PLC driver_input into the vehicle simulation.
+    # 5b. SceneryDriver — bridges ZMQ train_state → ScenerySource UDP
+    #     Converts internal position_m to visual edge_id + offset via
+    #     visual_mapping, then sends UDP frames to the 3-D viewer at 100 ms.
+    from app.communication.scenery_driver import SceneryDriver
+    scenery_driver = SceneryDriver(bus=bus)
+
+    # 6. Route PLC driver_input into the vehicle simulation.
     def _on_driver_input(topic: str, data: dict) -> None:
         data.setdefault("source", "driver_tcp")
         vehicle_message_router.handle({"type": "driver_input", **data})
@@ -141,12 +147,15 @@ async def lifespan(app: FastAPI):
     # Start everything
     plc_source.start()
     plc_aggregator.start()
+    scenery_driver.start()
     sim_loop.start()
 
     logger.info(
-        "Full pipeline started — PLC=%s:%s  ZMQ=%s",
+        "Full pipeline started — PLC=%s:%s  ZMQ=%s  Scenery→%s:%s",
         settings.PLC_HOST, settings.PLC_PORT,
         settings.ZMQ_BROKER_FRONTEND,
+        scenery_driver.source.scenery_host,
+        scenery_driver.source.scenery_port,
     )
 
     try:
@@ -154,6 +163,7 @@ async def lifespan(app: FastAPI):
     finally:
         await sim_loop.stop()
         plc_aggregator.stop()
+        scenery_driver.stop()
         plc_source.stop()
         bus.stop()
         await _stop_common()
