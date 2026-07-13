@@ -74,6 +74,21 @@ class PlcFeedbackAggregator:
             state.get("door_closed_light", state.get("doors_all_closed", True))
         )
         door_open = bool(state.get("door_open_light", not door_closed))
+
+        # ── ATO 具备条件判断 ──────────────────────────────────────────
+        # 上位机主动判断是否满足 ATO 前提条件，满足时发 ato_capable=True
+        # 给司机台，驱动按钮闪烁提示司机可以按下启动。
+        # 条件：门全关 + 方向手柄不在0位 + 无紧急制动
+        # 注意：不使用司机台下行帧里的 ato_capable 原样回传，
+        #       避免自循环（司机台说具备 → 上位机回传 → 司机台显示具备）。
+        direction_code = state.get("direction_code", 0)
+        emergency_brake = bool(state.get("emergency_brake", False))
+        ato_capable = (
+            door_closed
+            and int(direction_code) != 0
+            and not emergency_brake
+        )
+
         return {
             "vehicle_speed_kmh": float(
                 state.get("vehicle_speed_kmh", state.get("speed_kmh", state.get("speed", 0.0)))
@@ -85,7 +100,7 @@ class PlcFeedbackAggregator:
             "door_open_light": door_open,
             "door_closed_light": door_closed,
             "network_fault": network_fault,
-            "ato_capable": bool(state.get("ato_capable", False)),
+            "ato_capable": ato_capable,
             "wash_mode_status": bool(state.get("wash_mode_status", False)),
             "ato_active": bool(state.get("ato_active", False)),
             "auto_reverse_cap": bool(state.get("auto_reverse_cap", False)),
