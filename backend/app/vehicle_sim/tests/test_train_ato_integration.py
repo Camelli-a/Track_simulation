@@ -57,6 +57,28 @@ def test_step_tick_am_uses_train_ato_controller_command():
     assert train.state.mode == "ato"
 
 
+def test_step_tick_am_ato_uses_track_speed_limit_before_atp_emergency():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    train.state.position = 1760.0
+    train.state.speed_ms = 40.0 / 3.6
+    train.driving_mode = "AM"
+    train.cached_traction_level = 4
+    train.cached_brake_level = 0
+    train.next_stop_target_m = 2448.6
+    _apply_valid_ma(train, ma_limit=2500.0, allowed_speed=80.0, distance=740.0)
+
+    train.step_tick(0.1)
+
+    assert train.last_ato_output is not None
+    assert train.track.get_speed_limit(1760.0) == pytest.approx(34.992)
+    assert train.last_ato_output.safe_speed_limit_kmh == pytest.approx(34.992)
+    assert train.commanded_traction_level == 0
+    assert train.commanded_brake_level > 0
+    assert train.atp_intervened is False
+    assert train.state.emergency_brake is False
+
+
 def test_step_tick_sm_uses_cached_driver_command_but_computes_recommendation():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")

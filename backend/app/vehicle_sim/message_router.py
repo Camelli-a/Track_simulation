@@ -250,6 +250,14 @@ class MessageRouter:
                 ),
                 permission=item.get("permission"),
                 signal_state=item.get("signal_state"),
+                speed_limit_reason=item.get("speed_limit_reason"),
+                speed_limit_warning=bool(item.get("speed_limit_warning", False)),
+                upcoming_speed_limit_kmh=self._optional_float(
+                    item.get("upcoming_static_speed_limit")
+                ),
+                speed_limit_warning_distance_m=self._optional_float(
+                    item.get("speed_limit_warning_distance_m")
+                ),
                 updated_at=self._timestamp_or_now(
                     item.get("updated_at", item.get("timestamp", msg.get("timestamp")))
                 ),
