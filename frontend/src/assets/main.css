@@ -7,9 +7,10 @@
     color-scheme: dark;
     font-family: "Segoe UI Variable", "Bahnschrift", "Microsoft YaHei UI", "PingFang SC", sans-serif;
     background:
-      radial-gradient(circle at top left, rgba(34, 211, 238, 0.14), transparent 28%),
-      linear-gradient(180deg, #07111f 0%, #040814 54%, #02040b 100%);
-    background-color: #020617;
+      radial-gradient(circle at top left, rgba(125, 211, 252, 0.22), transparent 26%),
+      radial-gradient(circle at 85% 12%, rgba(251, 191, 36, 0.1), transparent 18%),
+      linear-gradient(180deg, #10233d 0%, #0c1a30 44%, #091321 100%);
+    background-color: #091321;
   }
 
   html {
@@ -17,7 +18,7 @@
   }
 
   body {
-    @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+    @apply min-h-screen bg-slate-900 text-slate-50 antialiased;
     margin: 0;
     font-family: "Segoe UI Variable", "Bahnschrift", "Microsoft YaHei UI", "PingFang SC", sans-serif;
   }
@@ -33,7 +34,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(103, 232, 249, 0.25) rgba(15, 23, 42, 0.3);
+    scrollbar-color: rgba(125, 211, 252, 0.45) rgba(15, 23, 42, 0.55);
   }
 
   *::-webkit-scrollbar {
@@ -42,35 +43,39 @@
   }
 
   *::-webkit-scrollbar-track {
-    background: rgba(15, 23, 42, 0.35);
+    background: rgba(15, 23, 42, 0.5);
   }
 
   *::-webkit-scrollbar-thumb {
-    background: rgba(103, 232, 249, 0.2);
+    background: rgba(125, 211, 252, 0.42);
     border-radius: 9999px;
-    border: 2px solid rgba(15, 23, 42, 0.35);
+    border: 2px solid rgba(15, 23, 42, 0.45);
   }
 }
 
 @layer components {
   .app-shell {
-    @apply relative flex min-h-screen overflow-hidden text-slate-100;
+    @apply relative flex min-h-screen overflow-hidden text-slate-50;
   }
 
   .app-sidebar {
-    @apply fixed inset-y-0 left-0 z-40 flex w-[21rem] flex-col border-r border-white/10 bg-slate-950/85 px-5 py-5 shadow-[0_24px_80px_rgba(2,6,23,0.55)] backdrop-blur-xl transition-transform duration-300 lg:static lg:h-screen lg:shrink-0 lg:translate-x-0;
+    @apply fixed inset-y-0 left-0 z-40 flex w-[21rem] flex-col border-r border-slate-600/40 bg-slate-900/95 px-5 py-5 shadow-[0_24px_80px_rgba(8,15,30,0.42)] backdrop-blur-xl transition-transform duration-300 lg:static lg:h-screen lg:shrink-0 lg:translate-x-0;
   }
 
   .app-topbar {
-    @apply flex flex-col gap-4 rounded-[1.75rem] border border-white/10 bg-white/[0.05] px-5 py-5 shadow-[0_24px_60px_rgba(2,6,23,0.32)] backdrop-blur-xl lg:flex-row lg:items-start lg:justify-between;
+    @apply flex flex-col gap-4 rounded-[1.75rem] border border-slate-600/40 bg-slate-900/90 px-5 py-5 shadow-[0_24px_60px_rgba(8,15,30,0.24)] backdrop-blur-xl lg:flex-row lg:items-start lg:justify-between;
   }
 
   .app-chip {
-    @apply inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium tracking-wide text-slate-300;
+    @apply inline-flex items-center rounded-full border border-slate-600/40 bg-slate-800/90 px-3 py-1.5 text-xs font-medium tracking-wide text-slate-100;
+  }
+
+  .app-chip-subtle {
+    @apply border-slate-500/30 bg-slate-800/55 text-slate-300;
   }
 
   .app-side-panel {
-    @apply rounded-[1.35rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_14px_30px_rgba(2,6,23,0.26)];
+    @apply rounded-[1.35rem] border border-slate-600/40 bg-slate-800/80 p-4 shadow-[0_14px_30px_rgba(8,15,30,0.2)];
   }
 
   .app-side-kicker {
@@ -78,35 +83,35 @@
   }
 
   .app-side-stat {
-    @apply rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-[0_12px_28px_rgba(2,6,23,0.2)];
+    @apply rounded-2xl border border-slate-600/40 bg-slate-800/80 px-4 py-3 shadow-[0_12px_28px_rgba(8,15,30,0.18)];
   }
 
   .app-side-stat-label {
-    @apply block text-[10px] uppercase tracking-[0.24em] text-slate-500;
+    @apply block text-[10px] uppercase tracking-[0.24em] text-slate-300;
   }
 
   .app-side-stat-value {
-    @apply mt-2 block text-lg font-semibold text-white;
+    @apply mt-2 block text-lg font-semibold text-slate-50;
   }
 
   .app-stat-card {
-    @apply rounded-[1.4rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_32px_rgba(2,6,23,0.26)] backdrop-blur-sm;
+    @apply rounded-[1.4rem] border border-slate-600/40 bg-slate-800/80 p-4 shadow-[0_18px_32px_rgba(8,15,30,0.2)] backdrop-blur-sm;
   }
 
   .app-stat-label {
-    @apply mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500;
+    @apply mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300;
   }
 
   .app-stat-value {
-    @apply text-2xl font-semibold tracking-tight text-white;
+    @apply text-2xl font-semibold tracking-tight text-slate-50;
   }
 
   .app-panel {
-    @apply rounded-[1.5rem] border border-white/10 bg-slate-950/70 px-5 py-5 shadow-[0_20px_42px_rgba(2,6,23,0.26)] backdrop-blur-sm md:px-6;
+    @apply rounded-[1.5rem] border border-slate-600/40 bg-slate-900/85 px-5 py-5 shadow-[0_20px_42px_rgba(8,15,30,0.2)] backdrop-blur-sm md:px-6;
   }
 
   .app-panel-compact {
-    @apply rounded-[1.35rem] border border-white/10 bg-slate-950/70 px-4 py-4 shadow-[0_16px_28px_rgba(2,6,23,0.22)] backdrop-blur-sm md:px-5;
+    @apply rounded-[1.35rem] border border-slate-600/40 bg-slate-900/85 px-4 py-4 shadow-[0_16px_28px_rgba(8,15,30,0.18)] backdrop-blur-sm md:px-5;
   }
 
   .app-section-head {
@@ -118,27 +123,27 @@
   }
 
   .app-section-title {
-    @apply text-sm font-semibold text-slate-100;
+    @apply text-sm font-semibold text-slate-50;
   }
 
   .app-section-copy {
-    @apply mt-1 max-w-3xl text-xs leading-5 text-slate-500;
+    @apply mt-1 max-w-3xl text-sm leading-6 text-slate-300;
   }
 
   .app-metric-tile {
-    @apply rounded-[1rem] border border-white/10 bg-black/20 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)];
+    @apply rounded-[1rem] border border-slate-600/40 bg-slate-800/70 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)];
   }
 
   .app-metric-label {
-    @apply text-[11px] text-slate-500;
+    @apply text-[11px] text-slate-300;
   }
 
   .app-metric-value {
-    @apply mt-1 text-lg font-semibold text-slate-100;
+    @apply mt-1 text-lg font-semibold text-slate-50;
   }
 
   .app-table-shell {
-    @apply mt-4 overflow-x-auto rounded-[1.15rem] border border-white/10 bg-black/10;
+    @apply mt-4 overflow-x-auto rounded-[1.15rem] border border-slate-600/40 bg-slate-900/80;
   }
 
   .app-table {
@@ -149,23 +154,23 @@
   }
 
   .app-table thead th {
-    @apply whitespace-nowrap border-b border-white/10 bg-white/[0.03] px-4 py-3.5 text-[11px] font-semibold tracking-[0.18em] text-slate-500;
+    @apply whitespace-nowrap border-b border-slate-600/40 bg-slate-800/90 px-4 py-3.5 text-[11px] font-semibold tracking-[0.18em] text-slate-300;
   }
 
   .app-table tbody td {
-    @apply whitespace-nowrap px-4 py-3.5 align-middle text-[13px] leading-6;
+    @apply whitespace-nowrap px-4 py-3.5 align-middle text-[13px] leading-6 text-slate-100;
   }
 
   .app-table tbody tr {
-    @apply border-b border-white/10 transition-colors;
+    @apply border-b border-slate-700/40 transition-colors;
   }
 
   .app-table tbody tr:nth-child(odd) {
-    background: rgba(255, 255, 255, 0.015);
+    background: rgba(30, 41, 59, 0.36);
   }
 
   .app-table tbody tr:hover {
-    background: rgba(148, 163, 184, 0.06);
+    background: rgba(96, 165, 250, 0.12);
   }
 
   .app-table tbody tr:last-child {
@@ -181,6 +186,26 @@
 
 .presentation-mode .rounded-2xl {
   border-color: rgb(55 65 81 / 0.8);
+}
+
+.text-slate-500 {
+  color: rgb(148 163 184 / 0.96);
+}
+
+.text-slate-400 {
+  color: rgb(203 213 225 / 0.97);
+}
+
+.text-slate-300 {
+  color: rgb(226 232 240 / 0.98);
+}
+
+.text-slate-200 {
+  color: rgb(241 245 249 / 0.98);
+}
+
+.bg-black\/10 {
+  background-color: rgba(15, 23, 42, 0.42);
 }
 
 /* 紧急模式全屏红框脉冲 */

@@ -5,10 +5,26 @@
       <div>
         <h3 class="text-sm font-semibold text-gray-200">电子地图 · 线路拓扑</h3>
         <p class="text-xs text-gray-500 mt-0.5">
-          北京地铁 9 号线 · Seg {{ graph?.placed_seg_count ?? 0 }}/{{ graph?.total_seg_count ?? 0 }} · MA 折线 · 信号机 · 滚轮缩放
+          {{ lineLabel }} · Seg {{ graph?.placed_seg_count ?? 0 }}/{{ graph?.total_seg_count ?? 0 }} · MA 折线 · 信号机 · 滚轮缩放
+        </p>
+        <p class="text-[11px] text-slate-400 mt-1">
+          区段底色表示占用状态；是否允许继续运行请看信号机灯色和 MA。
         </p>
       </div>
       <div class="flex items-center gap-2">
+        <span
+          v-if="selectedTrain"
+          class="text-[10px] px-2 py-1 rounded border"
+          :class="selectedPermissionChipClass"
+        >
+          {{ selectedPermissionText }}
+        </span>
+        <span
+          v-if="selectedMappingText"
+          class="text-[10px] px-2 py-1 rounded border border-slate-700 bg-slate-900/90 text-slate-300"
+        >
+          {{ selectedMappingText }}
+        </span>
         <button
           type="button"
           class="text-[10px] px-2 py-1 rounded border transition-colors"
@@ -31,7 +47,7 @@
     </div>
 
     <div v-if="!graph?.edges?.length" class="text-sm text-gray-600 py-12 text-center">
-      暂无拓扑数据，请运行 npm run convert-line-data
+      当前还没有收到可绘制的线路拓扑，请确认后端已返回 `sections` 线路数据
     </div>
 
     <div
@@ -75,36 +91,65 @@
 
         <!-- MA 进路 Seg 高亮 -->
         <g v-if="selectedMaSegIds.size">
-          <line
+          <polyline
             v-for="edge in graph.edges"
             :key="`ma-${edge.seg_id}`"
             v-show="selectedMaSegIds.has(edge.seg_id)"
-            :x1="edge.x1" :y1="edge.y1"
-            :x2="edge.x2" :y2="edge.y2"
+            :points="pathPoints(edge)"
             :stroke="color(selectedId)"
             stroke-width="5"
             stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
             opacity="0.35"
+          />
+        </g>
+
+        <!-- 相邻区段之间的连续连接线 -->
+        <g v-if="graph.connectors?.length">
+          <polyline
+            v-for="connector in graph.connectors"
+            :key="`connector-bed-${connector.key}`"
+            :points="pathPoints(connector)"
+            :stroke="edgeBedStroke(connectorColor(connector))"
+            :stroke-width="connector.branch === 'branch' ? 8 : 10"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+            opacity="0.88"
+          />
+          <polyline
+            v-for="connector in graph.connectors"
+            :key="`connector-core-${connector.key}`"
+            :points="pathPoints(connector)"
+            :stroke="edgeStroke(connectorColor(connector))"
+            :stroke-width="connector.branch === 'branch' ? 2 : 2.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+            opacity="0.92"
           />
         </g>
 
         <!-- 轨床 + 占用染色 -->
         <g v-for="edge in graph.edges" :key="`track-${edge.seg_id}`">
-          <line
-            :x1="edge.x1" :y1="edge.y1"
-            :x2="edge.x2" :y2="edge.y2"
+          <polyline
+            :points="pathPoints(edge)"
             :stroke="edgeBedStroke(edgeColor(edge.seg_id))"
             :stroke-width="edge.branch === 'branch' ? 10 : 12"
             stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
             opacity="0.9"
           />
-          <line
-            :x1="edge.x1" :y1="edge.y1"
-            :x2="edge.x2" :y2="edge.y2"
+          <polyline
+            :points="pathPoints(edge)"
             :stroke="edgeStroke(edgeColor(edge.seg_id))"
             :stroke-width="edge.branch === 'branch' ? 2.5 : 3.5"
             :stroke-dasharray="edge.branch === 'branch' ? '6 4' : undefined"
             stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
             :opacity="edge.branch === 'branch' ? 0.75 : 0.95"
             :filter="edgeColor(edge.seg_id) === 'green' ? 'url(#track-glow)' : undefined"
           />
@@ -174,6 +219,7 @@
           v-for="train in trainMarkers"
           :key="train.vehicle_id"
           class="cursor-pointer train-marker"
+          data-pan-ignore="true"
           :transform="trainTransform(train)"
           @click.stop="$emit('select', train.vehicle_id)"
         >
@@ -211,15 +257,16 @@
     </div>
 
     <div v-if="!compact" class="flex flex-wrap gap-x-4 gap-y-2 mt-3 text-[11px] text-gray-500">
-      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-emerald-500 rounded" /> 空闲</span>
-      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-yellow-500 rounded" /> 接近</span>
-      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-red-500 rounded" /> 占用</span>
-      <span class="flex items-center gap-1"><span class="w-2 h-3 rounded-sm bg-gray-700 border border-gray-500" /> 信号机</span>
+      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-sky-400 rounded" /> 空闲区段</span>
+      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-amber-500 rounded" /> 临近占用</span>
+      <span class="flex items-center gap-1"><span class="w-4 h-1 bg-rose-400 rounded" /> 已占用</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-3 rounded-sm bg-gray-700 border border-gray-500" /> 信号机灯色 = 通行许可</span>
       <span class="flex items-center gap-1"><span class="w-3 h-2 rounded-sm bg-sky-500" /> 列车</span>
       <span
         v-for="v in vehicles"
         :key="`lg-${v.vehicle_id}`"
         class="flex items-center gap-1 cursor-pointer hover:text-gray-300"
+        data-pan-ignore="true"
         @click="$emit('select', v.vehicle_id)"
       >
         <span class="w-2 h-2 rounded-sm" :style="{ backgroundColor: color(v.vehicle_id) }" />
@@ -235,6 +282,7 @@ import { useSvgPanZoom } from '@/composables/useSvgPanZoom'
 import { useTrainInterpolation } from '@/composables/useTrainInterpolation'
 import { lerpAngle } from '@/utils/interpolate'
 import {
+  findCandidateBlocksForVehicle,
   locateTrainOnGraph,
   buildMaPathOnGraph,
   buildMaPathSegIds,
@@ -256,6 +304,7 @@ const props = defineProps({
   vehicles: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
   color: { type: Function, required: true },
+  lineLabel: { type: String, default: '线路' },
   compact: { type: Boolean, default: false },
   totalLength: { type: Number, default: null },
   motionPaused: { type: Boolean, default: false },
@@ -265,7 +314,7 @@ defineEmits(['select'])
 
 const followTrain = ref(false)
 const trainMarkers = ref([])
-const prevAngles = new Map()
+const prevMarkerStates = new Map()
 
 const { displayVehicles } = useTrainInterpolation(toRef(props, 'vehicles'), {
   totalLength: toRef(props, 'totalLength'),
@@ -274,9 +323,10 @@ const { displayVehicles } = useTrainInterpolation(toRef(props, 'vehicles'), {
 
 const bounds = computed(() => {
   const edges = props.graph?.edges ?? []
-  if (!edges.length) return { minX: 0, maxX: 800, minY: 200, maxY: 320 }
-  const xs = edges.flatMap((e) => [e.x1, e.x2])
-  const ys = edges.flatMap((e) => [e.y1, e.y2])
+  const connectors = props.graph?.connectors ?? []
+  if (!edges.length && !connectors.length) return { minX: 0, maxX: 800, minY: 200, maxY: 320 }
+  const xs = [...edges, ...connectors].flatMap((item) => edgePoints(item).map((point) => point[0]))
+  const ys = [...edges, ...connectors].flatMap((item) => edgePoints(item).map((point) => point[1]))
   return {
     minX: Math.min(...xs),
     maxX: Math.max(...xs),
@@ -302,14 +352,28 @@ const { viewBoxString, zoom, dragging, reset, smoothPanToWorld, onWheel, onPoint
 
 function refreshTrainMarkers() {
   const edges = props.graph?.edges ?? []
+  const activeIds = new Set(displayVehicles.value.map((vehicle) => vehicle.vehicle_id))
+  for (const id of [...prevMarkerStates.keys()]) {
+    if (!activeIds.has(id)) prevMarkerStates.delete(id)
+  }
+
   const raw = displayVehicles.value
     .map((v) => {
-      const pos = locateTrainOnGraph(v, props.blocks, edges)
+      const prev = prevMarkerStates.get(v.vehicle_id) ?? null
+      const pos = locateTrainOnGraph(v, props.blocks, edges, {
+        preferredSegId: prev?.seg_id ?? null,
+        prevPoint: prev ? { x: prev.x, y: prev.y } : null,
+      })
       if (!pos) return null
-      const prev = prevAngles.get(v.vehicle_id)
-      const angle = prev != null ? lerpAngle(prev, pos.angle, 0.38) : pos.angle
-      prevAngles.set(v.vehicle_id, angle)
-      return { ...v, ...pos, angle }
+      const angle = resolveTrainAngle(pos, prev)
+      const marker = { ...v, ...pos, angle }
+      prevMarkerStates.set(v.vehicle_id, {
+        x: pos.x,
+        y: pos.y,
+        angle,
+        seg_id: pos.seg_id,
+      })
+      return marker
     })
     .filter(Boolean)
   trainMarkers.value = spreadTrainMarkers(raw)
@@ -377,6 +441,10 @@ const selectedTrain = computed(() =>
     ?? props.vehicles.find((v) => v.vehicle_id === props.selectedId)
 )
 
+const selectedMarker = computed(() =>
+  trainMarkers.value.find((marker) => marker.vehicle_id === props.selectedId) ?? null
+)
+
 const selectedMaPath = computed(() => {
   const train = selectedTrain.value
   if (!train?.ma_limit) return []
@@ -398,6 +466,26 @@ function edgeColor(segId) {
   return edgeAspect(segId, props.segments, props.blocks)
 }
 
+function edgePoints(item) {
+  if (Array.isArray(item?.points) && item.points.length >= 2) return item.points
+  return [
+    [item?.x1 ?? 0, item?.y1 ?? 0],
+    [item?.x2 ?? 0, item?.y2 ?? 0],
+  ]
+}
+
+function pathPoints(item) {
+  return edgePoints(item).map((point) => `${point[0]},${point[1]}`).join(' ')
+}
+
+function connectorColor(connector) {
+  const from = edgeColor(connector.from_seg_id)
+  const to = edgeColor(connector.to_seg_id)
+  if (from === 'red' || to === 'red') return 'red'
+  if (from === 'yellow' || to === 'yellow') return 'yellow'
+  return 'green'
+}
+
 function trainTransform(train) {
   const x = train.x + (train.offsetX ?? 0)
   const y = train.y + (train.offsetY ?? 0)
@@ -411,6 +499,65 @@ function speedTrailLen(speed) {
 function diamond(x, y, r) {
   return `${x},${y - r} ${x + r},${y} ${x},${y + r} ${x - r},${y}`
 }
+
+function resolveTrainAngle(positionOnGraph, prev) {
+  const rawAngle = positionOnGraph.angle ?? 0
+  if (!prev) return rawAngle
+
+  const dx = positionOnGraph.x - prev.x
+  const dy = positionOnGraph.y - prev.y
+  const motionDistance = Math.hypot(dx, dy)
+  const referenceAngle = motionDistance >= 0.6
+    ? (Math.atan2(dy, dx) * 180) / Math.PI
+    : prev.angle
+
+  const alignedAngle = alignAngleVariant(rawAngle, referenceAngle)
+  return lerpAngle(prev.angle, alignedAngle, 0.38)
+}
+
+function alignAngleVariant(rawAngle, referenceAngle) {
+  const candidateA = rawAngle
+  const candidateB = rawAngle + 180
+  const deltaA = angleDelta(referenceAngle, candidateA)
+  const deltaB = angleDelta(referenceAngle, candidateB)
+  return Math.abs(deltaA) <= Math.abs(deltaB) ? candidateA : candidateB
+}
+
+function angleDelta(fromDeg, toDeg) {
+  let delta = ((toDeg - fromDeg + 180) % 360) - 180
+  if (delta < -180) delta += 360
+  return delta
+}
+
+const selectedPermissionText = computed(() => {
+  const train = selectedTrain.value
+  if (!train) return ''
+  if (train.permission === 'stop' || train.signal_state === 'red') return `${train.vehicle_id} · 前方许可：红灯停车`
+  if (train.permission === 'restricted' || train.signal_state === 'yellow') return `${train.vehicle_id} · 前方许可：黄灯限速`
+  if (train.permission === 'allow' || train.signal_state === 'green') return `${train.vehicle_id} · 前方许可：绿灯允许`
+  return `${train.vehicle_id} · 前方许可：待确认`
+})
+
+const selectedPermissionChipClass = computed(() => {
+  const train = selectedTrain.value
+  if (!train) return 'border-slate-700 text-slate-300'
+  if (train.permission === 'stop' || train.signal_state === 'red') return 'border-red-500/50 bg-red-950 text-red-200'
+  if (train.permission === 'restricted' || train.signal_state === 'yellow') return 'border-amber-500/50 bg-amber-950 text-amber-200'
+  if (train.permission === 'allow' || train.signal_state === 'green') return 'border-emerald-500/40 bg-emerald-950 text-emerald-200'
+  return 'border-slate-700 text-slate-300'
+})
+
+const selectedMappingText = computed(() => {
+  const train = selectedTrain.value
+  if (!train) return ''
+
+  const candidates = findCandidateBlocksForVehicle(train, props.blocks)
+  const segId = selectedMarker.value?.seg_id ?? '—'
+  const sectionId = selectedMarker.value?.block?.section_id ?? selectedMarker.value?.block?.segment_id ?? '—'
+  return candidates.length > 1
+    ? `图上挂载 seg ${segId} · 区段 ${sectionId} · 重叠候选 ${candidates.length}`
+    : `图上挂载 seg ${segId} · 区段 ${sectionId}`
+})
 </script>
 
 <style scoped>

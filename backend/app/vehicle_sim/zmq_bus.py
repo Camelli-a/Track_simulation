@@ -11,6 +11,10 @@ DEFAULT_TOPICS = [
     "power_state",
     "comm_state",
     "track_info",
+    "add_train",
+    "remove_train",
+    "clear_trains",
+    "reset_trains",
 ]
 
 

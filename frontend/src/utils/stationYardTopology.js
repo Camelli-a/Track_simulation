@@ -11,6 +11,19 @@ export function buildStationYardSnapshot({
   turnouts = [],
   vehicles = [],
 }) {
+  const backendDriven = buildBackendStationYardSnapshot({
+    station,
+    range,
+    infrastructureSections,
+    layout,
+    segments,
+    signals,
+    turnouts,
+    vehicles,
+  })
+
+  if (backendDriven) return backendDriven
+
   const defaults = stationYardConfig.defaults ?? {}
   const explicitYard = resolveExplicitStationYard(layout, station?.station_id)
   const override = getStationYardOverride(station?.station_id)
@@ -678,4 +691,534 @@ function lerp(start, end, ratio) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
+}
+
+function buildBackendStationYardSnapshot({
+  station,
+  range,
+  infrastructureSections = [],
+  layout = null,
+  segments = [],
+  signals = [],
+  turnouts = [],
+  vehicles = [],
+}) {
+  const yardLayout = layout?.yard_layout ?? null
+  if (!yardLayout) return null
+
+  const yardStation = resolveBackendYardStation(yardLayout, station?.station_id)
+  if (!yardStation) return null
+
+  const trackPool = resolveBackendYardCollection(yardStation.tracks, yardLayout.yard_tracks, station?.station_id)
+  const sectionPool = resolveBackendYardCollection(yardStation.sections, yardLayout.yard_sections, station?.station_id)
+  const signalPool = resolveBackendYardCollection(yardStation.signals, yardLayout.yard_signals, station?.station_id)
+  const switchPool = resolveBackendYardCollection(yardStation.switches, yardLayout.yard_switches, station?.station_id)
+
+  if (!trackPool.length && !sectionPool.length) return null
+
+  const liveSegments = (segments ?? []).map(normalizeSegment)
+  const liveSegmentById = new Map(
+    liveSegments.map((segment) => [String(segment.section_id ?? segment.segment_id), segment]),
+  )
+  const infraBySectionId = new Map(
+    (infrastructureSections ?? []).map((section) => [String(section.section_id ?? section.segment_id), section]),
+  )
+  const dynamicSignalById = new Map(
+    (signals ?? []).map((signal) => [String(signal.signal_id), signal]),
+  )
+  const dynamicTurnoutById = new Map(
+    (turnouts ?? []).map((turnout) => [String(turnout.turnout_id ?? turnout.switch_id), turnout]),
+  )
+  const trackById = new Map(
+    trackPool.map((track) => [String(track.track_id), track]),
+  )
+
+  const localEdges = sectionPool
+    .map((section) => {
+      const track = trackById.get(String(section.track_id))
+      const points = normalizePolylinePoints(track?.geometry ?? section.geometry)
+      if (points.length < 2) return null
+
+      const live = liveSegmentById.get(String(section.section_id)) ?? infraBySectionId.get(String(section.section_id)) ?? {}
+      const first = points[0]
+      const last = points[points.length - 1]
+
+      return {
+        seg_id: String(section.section_id),
+        section_id: String(section.section_id),
+        track_id: section.track_id ?? track?.track_id ?? null,
+        x1: first[0],
+        y1: first[1],
+        x2: last[0],
+        y2: last[1],
+        points,
+        branch: trackBranchForType(track?.track_type),
+        track_type: track?.track_type ?? 'unknown',
+        track_name: track?.track_name ?? section.track_id ?? section.section_id,
+        start: Number(live.start ?? section.start ?? range?.start ?? 0),
+        end: Number(live.end ?? section.end ?? range?.end ?? 0),
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const yDiff = (a.y1 ?? 0) - (b.y1 ?? 0)
+      if (Math.abs(yDiff) > 1) return yDiff
+      return (a.x1 ?? 0) - (b.x1 ?? 0)
+    })
+
+  if (!localEdges.length) return null
+
+  const stationCenterY = resolveBackendStationCenterY(localEdges)
+  const liveEdgeStates = localEdges.map((edge) => ({
+    edge,
+    segment: liveSegmentById.get(edge.section_id)
+      ?? normalizeSegment({
+        section_id: edge.section_id,
+        start: edge.start,
+        end: edge.end,
+        occupied: false,
+        aspect: 'green',
+      }),
+  }))
+
+  const platformEdges = localEdges.filter((edge) => isPlatformTrackType(edge.track_type))
+  const platformLabels = platformEdges.map((edge) => {
+    const midpoint = pointOnPolyline(edge.points, 0.5)
+    const upperTrack = midpoint.y <= stationCenterY
+    return {
+      seg_id: edge.section_id,
+      x: midpoint.x,
+      y: midpoint.y + (upperTrack ? -10 : 14),
+      text: simplifyTrackLabel(edge.track_name, edge.track_id),
+    }
+  })
+
+  const segmentLabelMarkers = localEdges.map((edge, index) => {
+    const segment = liveEdgeStates.find((item) => item.edge.section_id === edge.section_id)?.segment ?? null
+    const midpoint = pointOnPolyline(edge.points, 0.5)
+    const upperTrack = midpoint.y <= stationCenterY
+    return {
+      seg_id: edge.section_id,
+      x: midpoint.x,
+      y: midpoint.y + (upperTrack ? -4.5 - (index % 2) * 2 : 9 + (index % 2) * 2),
+      aspect: segment?.aspect ?? edge.branch ?? 'green',
+      occupied: Boolean(segment?.occupied),
+    }
+  })
+
+  const localSignalsRaw = signalPool
+    .map((seed) => {
+      const dyn = dynamicSignalById.get(String(seed.signal_id)) ?? {}
+      const point = normalizePointGeometry(seed.geometry)
+      const edge = findBackendEdgeForSignal({
+        signal: dyn,
+        seed,
+        edges: localEdges,
+      })
+
+      const anchor = edge
+        ? pointOnPolylineAtX(edge.points, point?.x)
+        : null
+
+      const mastX = point?.x ?? anchor?.x
+      const anchorY = anchor?.y ?? point?.y ?? stationCenterY
+      const headY = point?.y ?? anchorY - 10
+      const upperTrack = headY <= anchorY
+      const position = Number(
+        dyn.position
+        ?? inferEdgeMidPosition(edge)
+        ?? station?.position
+        ?? range?.start
+        ?? 0,
+      )
+
+      if (!Number.isFinite(mastX) || !Number.isFinite(anchorY)) return null
+
+      return {
+        ...seed,
+        ...dyn,
+        key: `${seed.signal_id}-${position}`,
+        signal_id: seed.signal_id,
+        station_id: dyn.station_id ?? seed.station_id ?? station?.station_id ?? null,
+        track_id: dyn.track_id ?? seed.track_id ?? edge?.track_id ?? null,
+        position,
+        state: dyn.state ?? dyn.signal_state ?? 'unknown',
+        signal_state: dyn.signal_state ?? dyn.state ?? 'unknown',
+        protects_switch_id: dyn.protects_switch_id ?? seed.protects_switch_id ?? null,
+        protects_section_id: dyn.protects_section_id ?? seed.protects_section_id ?? edge?.section_id ?? null,
+        protects_turnout_ids: [dyn.protects_switch_id ?? seed.protects_switch_id].filter(Boolean),
+        direction: dyn.direction ?? seed.direction ?? null,
+        facing: resolveSignalFacing(dyn.direction ?? seed.direction),
+        x: mastX,
+        anchorY,
+        mastBaseY: anchorY + (upperTrack ? -8 : 8),
+        headY,
+        labelY: headY + (upperTrack ? -7 : 15),
+      }
+    })
+    .filter(Boolean)
+
+  const localTurnouts = switchPool
+    .map((seed) => {
+      const dyn = dynamicTurnoutById.get(String(seed.switch_id)) ?? dynamicTurnoutById.get(String(seed.turnout_id ?? seed.switch_id)) ?? {}
+      const point = normalizePointGeometry(seed.geometry)
+      const relatedEdge = findBackendEdgeForTurnout({
+        turnout: dyn,
+        seed,
+        edges: localEdges,
+      })
+      const edgeMidpoint = relatedEdge ? pointOnPolyline(relatedEdge.points, 0.5) : null
+      const position = Number(
+        inferBackendTurnoutPosition(dyn, relatedEdge)
+        ?? station?.position
+        ?? range?.start
+        ?? 0,
+      )
+
+      return {
+        ...seed,
+        ...dyn,
+        turnout_id: dyn.turnout_id ?? seed.switch_id,
+        switch_id: seed.switch_id,
+        position,
+        graph_x: point?.x ?? edgeMidpoint?.x ?? 0,
+        graph_y: point?.y ?? edgeMidpoint?.y ?? stationCenterY,
+        state: dyn.state ?? dyn.position ?? 'normal',
+        locked: Boolean(dyn.locked),
+      }
+    })
+    .filter((turnout) => Number.isFinite(turnout.graph_x) && Number.isFinite(turnout.graph_y))
+
+  const turnoutSignalPairs = resolveTurnoutSignalPairs({
+    turnouts: localTurnouts,
+    signals: localSignalsRaw,
+    yard: {},
+    defaults: { signalGuardDistanceM: 260 },
+  })
+
+  const localSignalMarkers = localSignalsRaw
+    .map((signal) => decorateSignalMarker(signal, turnoutSignalPairs.pairs, turnoutSignalPairs.guardKeys, { graph_y: stationCenterY }))
+    .sort((a, b) => (a.x ?? 0) - (b.x ?? 0))
+
+  const localTurnoutsWithGuards = localTurnouts.map((turnout) => ({
+    ...turnout,
+    guardSignalIds: turnoutSignalPairs.byTurnout.get(turnoutKey(turnout)) ?? [],
+  }))
+
+  const guardSignalsBase = localSignalMarkers.filter((signal) => signal.isGuardSignal)
+  const guardSignals = guardSignalsBase.length ? guardSignalsBase : localSignalMarkers
+  const turnoutBranchLines = buildBackendTurnoutBranchLines(localTurnoutsWithGuards, trackPool)
+
+  const localVehicles = vehicles.filter((vehicle) =>
+    isVehicleInStationRange(vehicle, range, station?.station_id),
+  )
+
+  const vehicleMarkers = localVehicles
+    .map((vehicle, index) => {
+      const projection = projectVehicleOnBackendYard(vehicle, localEdges)
+      if (!projection) return null
+
+      const upperTrack = projection.y <= stationCenterY
+      return {
+        ...vehicle,
+        x: projection.x,
+        y: projection.y,
+        labelY: projection.y + (upperTrack ? -12 - (index % 2) * 8 : 16 + (index % 2) * 8),
+      }
+    })
+    .filter(Boolean)
+
+  const viewBox = resolveBackendViewBox({
+    edges: localEdges,
+    signals: localSignalMarkers,
+    turnouts: localTurnoutsWithGuards,
+    vehicles: vehicleMarkers,
+  })
+
+  return {
+    platformEntries: trackPool,
+    platformTrackLabel: platformLabels.map((label) => label.text).join(' / ') || trackPool.map((track) => simplifyTrackLabel(track.track_name, track.track_id)).join(' / '),
+    localEdges,
+    platformEdges,
+    platformLabels,
+    segmentLabelMarkers,
+    viewBox,
+    gridXs: createGrid(viewBox.minX, viewBox.maxX, 24),
+    gridYs: createGrid(viewBox.minY, viewBox.maxY, 22),
+    liveEdgeStates,
+    occupiedSegments: liveEdgeStates.filter((item) => item.segment.occupied).map((item) => item.segment),
+    localSignals: localSignalMarkers,
+    turnoutBranchLines,
+    turnoutSignalPairs: turnoutSignalPairs.pairs,
+    guardSignals,
+    localSignalMarkers,
+    localTurnoutsWithGuards,
+    localVehicles,
+    vehicleMarkers,
+    orderedSignals: [...guardSignals].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    orderedTurnouts: [...localTurnoutsWithGuards].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    orderedVehicles: [...localVehicles].sort((a, b) =>
+      Math.abs((a.position ?? 0) - (station?.position ?? 0))
+      - Math.abs((b.position ?? 0) - (station?.position ?? 0)),
+    ),
+    guardCoverageText: buildGuardCoverageText(localTurnoutsWithGuards),
+    throatSummaryText: buildThroatSummaryText(localTurnoutsWithGuards),
+    vehicleSummaryText: buildVehicleSummaryText(localVehicles, station),
+  }
+}
+
+function resolveBackendYardStation(yardLayout, stationId) {
+  return (yardLayout?.stations ?? []).find((station) => station.station_id === stationId) ?? null
+}
+
+function resolveBackendYardCollection(localCollection, globalCollection, stationId) {
+  if (Array.isArray(localCollection) && localCollection.length) return localCollection
+  return (globalCollection ?? []).filter((item) => item.station_id === stationId)
+}
+
+function normalizePolylinePoints(geometry) {
+  const points = geometry?.points ?? []
+  return points
+    .filter((point) => Array.isArray(point) && point.length >= 2)
+    .map((point) => [Number(point[0]), Number(point[1])])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+}
+
+function normalizePointGeometry(geometry) {
+  if (Number.isFinite(Number(geometry?.x)) && Number.isFinite(Number(geometry?.y))) {
+    return { x: Number(geometry.x), y: Number(geometry.y) }
+  }
+
+  const points = normalizePolylinePoints(geometry)
+  if (!points.length) return null
+  return { x: points[0][0], y: points[0][1] }
+}
+
+function trackBranchForType(trackType) {
+  if (trackType === 'main' || trackType === 'platform') return 'main'
+  return 'branch'
+}
+
+function isPlatformTrackType(trackType) {
+  return ['main', 'platform', 'arrival_departure'].includes(trackType)
+}
+
+function simplifyTrackLabel(trackName, trackId) {
+  if (trackName) return trackName.replace(/^Track\s+/i, 'T')
+  return trackId ?? 'Track'
+}
+
+function resolveBackendStationCenterY(edges) {
+  const ys = edges.flatMap((edge) => edge.points.map((point) => point[1]))
+  if (!ys.length) return 0
+  return ys.reduce((sum, value) => sum + value, 0) / ys.length
+}
+
+function pointOnPolyline(points, ratio) {
+  if (!points?.length) return { x: 0, y: 0 }
+  if (points.length === 1) return { x: points[0][0], y: points[0][1] }
+
+  const lengths = []
+  let total = 0
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index]
+    const end = points[index + 1]
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1])
+    lengths.push(length)
+    total += length
+  }
+
+  if (!total) return { x: points[0][0], y: points[0][1] }
+
+  const target = clamp(ratio, 0, 1) * total
+  let cursor = 0
+  for (let index = 0; index < lengths.length; index += 1) {
+    const next = cursor + lengths[index]
+    if (target <= next || index === lengths.length - 1) {
+      const localRatio = lengths[index] ? (target - cursor) / lengths[index] : 0
+      return {
+        x: lerp(points[index][0], points[index + 1][0], localRatio),
+        y: lerp(points[index][1], points[index + 1][1], localRatio),
+      }
+    }
+    cursor = next
+  }
+
+  const last = points[points.length - 1]
+  return { x: last[0], y: last[1] }
+}
+
+function pointOnPolylineAtX(points, x) {
+  if (!points?.length) return null
+  if (!Number.isFinite(x)) return pointOnPolyline(points, 0.5)
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index]
+    const end = points[index + 1]
+    const minX = Math.min(start[0], end[0])
+    const maxX = Math.max(start[0], end[0])
+
+    if (x >= minX && x <= maxX) {
+      const ratio = maxX !== minX ? (x - start[0]) / (end[0] - start[0]) : 0.5
+      return {
+        x,
+        y: lerp(start[1], end[1], ratio),
+      }
+    }
+  }
+
+  const closest = points.reduce((best, point) => {
+    if (!best) return point
+    return Math.abs(point[0] - x) < Math.abs(best[0] - x) ? point : best
+  }, null)
+
+  return closest ? { x: closest[0], y: closest[1] } : null
+}
+
+function findBackendEdgeForSignal({ signal, seed, edges }) {
+  const sectionId = signal.section_id ?? seed.protects_section_id ?? null
+  if (sectionId) {
+    const edge = edges.find((item) => String(item.section_id) === String(sectionId))
+    if (edge) return edge
+  }
+
+  const trackId = signal.track_id ?? seed.track_id ?? null
+  if (trackId) {
+    const edge = edges.find((item) => String(item.track_id) === String(trackId))
+    if (edge) return edge
+  }
+
+  return null
+}
+
+function inferEdgeMidPosition(edge) {
+  if (!edge) return null
+  if (Number.isFinite(edge.start) && Number.isFinite(edge.end)) {
+    return (edge.start + edge.end) / 2
+  }
+  return null
+}
+
+function findBackendEdgeForTurnout({ turnout, seed, edges }) {
+  const relatedSection = turnout.related_section ?? seed.related_section ?? null
+  if (relatedSection) {
+    const edge = edges.find((item) => String(item.section_id) === String(relatedSection))
+    if (edge) return edge
+  }
+
+  const activeTrackId = turnout.reverse_to ?? turnout.normal_to ?? seed.reverse_to ?? seed.normal_to ?? null
+  if (activeTrackId) {
+    const edge = edges.find((item) => String(item.track_id) === String(activeTrackId))
+    if (edge) return edge
+  }
+
+  const connectTrackId = (turnout.connects ?? seed.connects ?? [])[0] ?? null
+  if (connectTrackId) {
+    return edges.find((item) => String(item.track_id) === String(connectTrackId)) ?? null
+  }
+
+  return null
+}
+
+function inferBackendTurnoutPosition(turnout, edge) {
+  if (Number.isFinite(turnout.position)) return Number(turnout.position)
+  if (!edge) return null
+  return inferEdgeMidPosition(edge)
+}
+
+function buildBackendTurnoutBranchLines(turnouts, tracks) {
+  const trackById = new Map(
+    (tracks ?? []).map((track) => [String(track.track_id), normalizePolylinePoints(track.geometry)]),
+  )
+  const lines = []
+  const seen = new Set()
+
+  for (const turnout of turnouts) {
+    const activeTrackId = isReverseState(turnout.state)
+      ? (turnout.reverse_to ?? null)
+      : (turnout.normal_to ?? null)
+
+    for (const trackId of turnout.connects ?? []) {
+      const points = trackById.get(String(trackId)) ?? []
+      if (points.length < 2) continue
+
+      const target = pointOnPolylineAtX(points, turnout.graph_x) ?? pointOnPolyline(points, 0.5)
+      const key = `${turnout.turnout_id}:${trackId}:${target.x}:${target.y}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      lines.push({
+        key,
+        turnout_id: turnout.turnout_id,
+        x1: turnout.graph_x,
+        y1: turnout.graph_y,
+        x2: target.x,
+        y2: target.y,
+        role: trackId === turnout.reverse_to ? 'reverse' : (trackId === turnout.normal_to ? 'normal' : 'branch'),
+        active: activeTrackId != null && String(activeTrackId) === String(trackId),
+        locked: Boolean(turnout.locked),
+      })
+    }
+  }
+
+  return lines
+}
+
+function isVehicleInStationRange(vehicle, range, stationId) {
+  if (vehicle.station_id && stationId && vehicle.station_id === stationId) return true
+  if (vehicle.position == null) return false
+  return vehicle.position >= (range?.start ?? 0) - 1 && vehicle.position <= (range?.end ?? 0) + 1
+}
+
+function projectVehicleOnBackendYard(vehicle, edges) {
+  const sectionEdge = edges.find((edge) =>
+    Number.isFinite(edge.start)
+    && Number.isFinite(edge.end)
+    && vehicle.position != null
+    && vehicle.position >= edge.start
+    && vehicle.position <= edge.end,
+  )
+
+  const trackEdge = !sectionEdge && vehicle.track_id
+    ? edges.find((edge) => String(edge.track_id) === String(vehicle.track_id))
+    : null
+
+  const edge = sectionEdge ?? trackEdge
+  if (!edge) return null
+
+  const ratio = Number.isFinite(edge.start) && Number.isFinite(edge.end) && edge.end !== edge.start
+    ? clamp((vehicle.position - edge.start) / (edge.end - edge.start), 0, 1)
+    : 0.5
+
+  return pointOnPolyline(edge.points, ratio)
+}
+
+function resolveBackendViewBox({ edges, signals, turnouts, vehicles }) {
+  const xs = [
+    ...edges.flatMap((edge) => edge.points.map((point) => point[0])),
+    ...signals.flatMap((signal) => [signal.x ?? 0]),
+    ...turnouts.flatMap((turnout) => [turnout.graph_x ?? 0]),
+    ...vehicles.flatMap((vehicle) => [vehicle.x ?? 0]),
+  ].filter(Number.isFinite)
+
+  const ys = [
+    ...edges.flatMap((edge) => edge.points.map((point) => point[1])),
+    ...signals.flatMap((signal) => [signal.headY ?? signal.anchorY ?? 0, signal.labelY ?? 0]),
+    ...turnouts.flatMap((turnout) => [turnout.graph_y ?? 0]),
+    ...vehicles.flatMap((vehicle) => [vehicle.y ?? 0, vehicle.labelY ?? 0]),
+  ].filter(Number.isFinite)
+
+  const minX = (xs.length ? Math.min(...xs) : 0) - 20
+  const maxX = (xs.length ? Math.max(...xs) : 280) + 20
+  const minY = (ys.length ? Math.min(...ys) : 80) - 18
+  const maxY = (ys.length ? Math.max(...ys) : 180) + 18
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width: Math.max(140, maxX - minX),
+    height: Math.max(120, maxY - minY),
+  }
 }

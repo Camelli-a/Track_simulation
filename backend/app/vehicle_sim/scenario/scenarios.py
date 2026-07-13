@@ -184,10 +184,59 @@ def comm_lost_brake() -> Scenario:
     )
 
 
+def dynamic_train_management() -> Scenario:
+    return Scenario(
+        name="dynamic_train_management",
+        description="Dynamic train add/remove/clear/reset management scenario",
+        duration_sec=18.0,
+        events=[
+            ScenarioEvent(
+                3.0,
+                {
+                    "type": "add_train",
+                    "vehicle_id": "TRAIN-011",
+                    "train_index": 11,
+                    "line_id": "LINE-1",
+                    "position": 1000.0,
+                },
+            ),
+            ScenarioEvent(
+                6.0,
+                {
+                    "type": "remove_train",
+                    "vehicle_id": "TRAIN-003",
+                },
+            ),
+            ScenarioEvent(
+                9.0,
+                {
+                    "type": "add_train",
+                    "line_id": "LINE-1",
+                    "position": 1200.0,
+                },
+            ),
+            ScenarioEvent(
+                12.0,
+                {
+                    "type": "clear_trains",
+                },
+            ),
+            ScenarioEvent(
+                15.0,
+                {
+                    "type": "reset_trains",
+                    "count": 5,
+                },
+            ),
+        ],
+    )
+
+
 SCENARIOS = {
     "normal_station_stop": normal_station_stop,
     "overspeed_atp": overspeed_atp,
     "ma_limit_brake": ma_limit_brake,
     "power_fault_brake": power_fault_brake,
     "comm_lost_brake": comm_lost_brake,
+    "dynamic_train_management": dynamic_train_management,
 }

@@ -80,6 +80,8 @@ export function useSvgPanZoom(getBaseViewBox) {
 
   function onPointerDown(event) {
     if (event.button !== 0) return
+    const target = event.target
+    if (target?.closest?.('[data-pan-ignore="true"]')) return
     setContainer(event.currentTarget)
     dragging.value = true
     lastPt.value = { x: event.clientX, y: event.clientY }

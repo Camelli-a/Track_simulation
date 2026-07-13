@@ -7,6 +7,14 @@ export function fetchDashboardSnapshot() {
   return http.get('/dashboard/snapshot')
 }
 
+export function fetchDashboardSceneState() {
+  return http.get('/dashboard/scene-state')
+}
+
+export function fetchStationYards(options = {}) {
+  return http.get('/dashboard/stations/yards', options)
+}
+
 /**
  * 手动触发后端发布当前 track_info 到消息总线
  */

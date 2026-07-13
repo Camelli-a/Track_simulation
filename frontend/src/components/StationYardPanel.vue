@@ -323,7 +323,7 @@
           </div>
 
           <div v-else class="px-4 py-10 text-center text-sm text-slate-500">
-            当前站点还没有可绘制的拓扑图段。下一步请先核对 `line-layout.json` 中该站附近的 `graph.edges`、`platforms` 与道岔图形坐标。
+            当前站点还没有可绘制的站场几何。请先检查后端 `stations/yards` 是否已经提供该站的股道、信号机、道岔与图形坐标；如果后端仍未提供，再回退补本地静态映射。
           </div>
         </div>
 
