@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     UDP_PORT: int = 9000
 
     # Driver desk PLC over TCP.
+    # DriverDeskSource always starts in zmq mode and retries until connected.
+    # Set PLC_HOST/PLC_PORT to match the real hardware; if the PLC is not
+    # reachable the source will keep retrying silently in the background.
     PLC_HOST: str = "192.168.100.123"
     PLC_PORT: int = 8001
 

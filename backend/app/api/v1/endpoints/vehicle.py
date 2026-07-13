@@ -17,9 +17,16 @@ from app.vehicle_sim.train_manager import TrainManager
 
 router = APIRouter()
 service = VehicleService()
+logger = logging.getLogger("uvicorn.error")
+
+# ---------------------------------------------------------------------------
+# Singleton TrainManager + MessageRouter shared across the whole application.
+# Importing this module multiple times always returns the same objects.
+# main.py reads `vehicle_manager` to wire up the SimulationLoop and the PLC
+# feedback aggregator.
+# ---------------------------------------------------------------------------
 vehicle_manager = TrainManager()
 vehicle_message_router = MessageRouter(vehicle_manager)
-logger = logging.getLogger("uvicorn.error")
 
 
 @router.get("/status", response_model=VehicleStatus, summary="Get current vehicle status")
