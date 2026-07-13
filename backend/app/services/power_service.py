@@ -9,14 +9,29 @@ class PowerService(BaseService):
     def get_status(self) -> PowerStatus:
         if self.source == "mock":
             return self._mock_status()
-        elif self.source == "udp":
-            # TODO: 接入 UDP 数据源
-            raise NotImplementedError("UDP 数据源尚未实现")
-        elif self.source == "zmq":
-            # TODO: 接入 ZMQ 数据源
-            raise NotImplementedError("ZMQ 数据源尚未实现")
+        elif self.source in {"zmq", "udp"}:
+            return self._zmq_status()
         else:
             raise ValueError(f"未知数据源: {self.source}")
+
+    def _zmq_status(self) -> PowerStatus:
+        """从 state_store 读取实时供电状态，无数据时降级 mock。"""
+        try:
+            from app.data_flow.state_store import state_store
+            snapshot = state_store.get_snapshot()
+            p = snapshot.power
+            if p and not p.is_stale:
+                return PowerStatus(
+                    timestamp=time.time(),
+                    voltage=p.voltage,
+                    current=p.current,
+                    power=p.power,
+                    substation_id=p.substation_id,
+                    is_fault=p.is_fault,
+                )
+        except Exception:
+            pass
+        return self._mock_status()
 
     def get_history(self, limit: int = 100):
         # TODO: 接入历史数据存储
