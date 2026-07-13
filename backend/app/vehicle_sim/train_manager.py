@@ -146,6 +146,16 @@ class TrainManager:
                 emergency_button=False,
                 command=command.get("command", 0),
                 percent=command.get("percent", 0.0),
+                traction_percent=(
+                    float(command.get("percent", 0.0))
+                    if int(command.get("command", 0)) == 1
+                    else 0.0
+                ),
+                brake_percent=(
+                    float(command.get("percent", 0.0))
+                    if int(command.get("command", 0)) == 2
+                    else 0.0
+                ),
             )
             train.step_manual(driver_input, dt)
             train.step_tick(dt)

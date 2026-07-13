@@ -3,6 +3,7 @@ import time
 
 from .mock_data import DEFAULT_TRACK
 from .models import AtoCommand
+from .models import MaLimit
 from .track_map import TrackMap
 from .train import Train
 
@@ -12,6 +13,19 @@ def main():
     train = Train("TRAIN-001", "LINE-1", track)
 
     dt = 0.1
+    train.apply_ma_state(
+        MaLimit(
+            vehicle_id="TRAIN-001",
+            ma_limit=1800.0,
+            target_speed=60.0,
+            reason="local_demo",
+            allowed_speed_kmh=60.0,
+            target_distance_m=1800.0,
+            permission="allow",
+            signal_state="green",
+            updated_at=time.time(),
+        )
+    )
 
     for i in range(100):
         ato_command = AtoCommand(
@@ -26,6 +40,8 @@ def main():
         )
 
         train.step_ato(ato_command, dt)
+        train.ma_updated_at = time.time()
+        train.step_tick(dt)
         print(json.dumps(train.state.to_protocol(), ensure_ascii=False))
 
         time.sleep(dt)

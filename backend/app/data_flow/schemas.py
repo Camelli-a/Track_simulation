@@ -112,11 +112,45 @@ class DriverInput(BaseModel):
     vehicle_id: str
     line_id: str = "LINE-1"
     source: DataSource = "mock"
-    traction_level: int = 0
-    brake_level: int = 0
-    direction: Literal["forward", "backward", "neutral"] = "forward"
+    traction_level: int = Field(default=0, ge=0, le=4)
+    brake_level: int = Field(default=0, ge=0, le=7)
+    traction_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    brake_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    main_handle_raw: Optional[int] = None
+    key_switch: Optional[bool] = None
+    direction: Literal["forward", "reverse", "backward", "neutral"] = "forward"
+    direction_code: Optional[int] = Field(default=None, ge=0, le=2)
     control_mode: Literal["manual", "ato"] = "manual"
     emergency_button: bool = False
+    ato_start_btn: bool = False
+    ato_capable: Optional[bool] = None
+    ato_active: Optional[bool] = None
+    auto_reverse_cap: Optional[bool] = None
+    auto_reverse_active: Optional[bool] = None
+    auto_rev_flag: bool = False
+    mode_up_confirm: bool = False
+    mode_dn_confirm: bool = False
+    vigilance: bool = False
+    vigilance_allow: bool = False
+    forced_release: bool = False
+    parking_apply: bool = False
+    parking_release: bool = False
+    brake_bad_light: Optional[bool] = None
+    network_fault_light: Optional[bool] = None
+    open_left_door: bool = False
+    open_right_door: bool = False
+    close_left_door: bool = False
+    close_right_door: bool = False
+    door_mode: Optional[str] = None
+    door_closed_light: Optional[bool] = None
+    high_voltage_light: Optional[bool] = None
+    forced_pump: bool = False
+    horn: bool = False
+    confirm_flag: bool = False
+    trac_aux_reset: bool = False
+    wash_mode_switch: bool = False
+    frame_seq: Optional[int] = None
+    message_id: Optional[str] = None
     updated_at: float
     received_at: Optional[float] = None
     protocol: Optional[str] = None
@@ -149,8 +183,26 @@ class TrainSnapshot(BaseModel):
     fault_speed_limit: Optional[float] = None
     traction_level: Optional[int] = None
     brake_level: Optional[int] = None
+    traction_percent: Optional[float] = None
+    brake_percent: Optional[float] = None
+    actual_traction_force_n: Optional[float] = None
+    actual_brake_force_n: Optional[float] = None
+    atp_intervention: Optional[bool] = None
+    driving_mode: Optional[str] = None
+    control_source: Optional[str] = None
+    ato_capable: Optional[bool] = None
+    auto_reverse_cap: Optional[bool] = None
+    auto_reverse_active: Optional[bool] = None
+    recommended_speed_kmh: Optional[float] = None
+    parking_brake: Optional[bool] = None
+    high_voltage_on: Optional[bool] = None
+    door_open_light: Optional[bool] = None
+    external_speed_limit_kmh: Optional[float] = None
+    active_faults: List[str] = Field(default_factory=list)
     door_mode: Optional[str] = None
     door_closed_light: Optional[bool] = None
+    high_voltage_light: Optional[bool] = None
+    brake_bad_light: Optional[bool] = None
     ato_active: Optional[bool] = None
     parking_apply: Optional[bool] = None
     parking_release: Optional[bool] = None

@@ -70,6 +70,16 @@ def main():
                 print(json.dumps(state, ensure_ascii=False))
 
             for train in manager.trains.values():
+                for state in (
+                    train.build_ato_state(),
+                    train.build_atp_state(),
+                    train.build_door_state(),
+                ):
+                    if publisher is not None:
+                        publisher.publish(state)
+                    print(json.dumps(state, ensure_ascii=False))
+
+            for train in manager.trains.values():
                 if train.last_alarm is not None:
                     if publisher is not None:
                         publisher.publish(train.last_alarm)

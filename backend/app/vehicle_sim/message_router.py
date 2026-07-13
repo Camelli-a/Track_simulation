@@ -1,11 +1,7 @@
 import time
 
-from .adapters.command_mapping import (
-    command_percent_to_levels,
-    normalize_driver_brake_level,
-    normalize_driver_traction_level,
-)
-from .adapters.driver_plc_mapping import decode_driver_handle, direction_code_to_text
+from .adapters.command_mapping import command_percent_to_levels
+from .adapters.driver_plc_mapping import decode_driver_control, direction_code_to_text
 from .adapters.id_mapping import index_to_vehicle_id, vehicle_id_to_index
 from .models import AtoCommand, CommState, DriverInput, MaLimit, PowerState, TrackSection
 from .track_map import TrackMap
@@ -17,10 +13,12 @@ class MessageRouter:
         self,
         train_manager,
         default_dt: float = 0.1,
+        physical_driver_vehicle_id: str = "TRAIN-001",
         owned_vehicle_id: str | None = None,
     ):
         self.train_manager = train_manager
         self.default_dt = default_dt
+        self.physical_driver_vehicle_id = physical_driver_vehicle_id
         self.owned_vehicle_id = owned_vehicle_id
 
     def handle(self, message: dict):
@@ -28,17 +26,23 @@ class MessageRouter:
         msg_type = message.get("type")
 
         if msg_type == "driver_input":
-            self._handle_driver_input(message)
+            return self._handle_driver_input(message)
         elif msg_type == "ato_command":
             self._handle_ato_command(message)
         elif msg_type == "ma_state":
             self._handle_ma_state(message)
+        elif msg_type == "speed_constraint":
+            return self._handle_speed_constraint(message)
+        elif msg_type in {"signal_state", "interlocking_state"}:
+            return self._handle_signal_or_interlocking_state(message)
         elif msg_type == "power_state":
             self._handle_power_state(message)
         elif msg_type == "comm_state":
             self._handle_comm_state(message)
         elif msg_type == "track_info":
             self._handle_track_info(message)
+        elif msg_type == "fault_event":
+            return self._handle_fault_event(message)
         elif msg_type == "enable_fallback_ato":
             self._handle_enable_fallback_ato(message)
         elif msg_type == "set_train_state":
@@ -61,72 +65,108 @@ class MessageRouter:
             return self.train_manager.reset_trains(int(message.get("count", 10)))
 
     def _handle_driver_input(self, msg: dict):
-        vehicle_id = self._target_vehicle_id(msg)
-        if vehicle_id is None:
-            return
+        source = str(msg.get("source", "mock")).lower()
+        physical_source = source in {"driver_tcp", "driver_desk", "driver_plc", "plc"}
+        if physical_source:
+            vehicle_id = msg.get("vehicle_id")
+            if not isinstance(vehicle_id, str) or not vehicle_id:
+                return {"ok": False, "reason": "driver_input_requires_vehicle_id"}
+            if vehicle_id != self.physical_driver_vehicle_id:
+                return {
+                    "ok": False,
+                    "reason": "physical_driver_vehicle_mismatch",
+                    "vehicle_id": vehicle_id,
+                }
+        else:
+            vehicle_id = self._target_vehicle_id(msg)
+            if vehicle_id is None:
+                return {"ok": True, "ignored": True, "reason": "vehicle_id_not_owned"}
         train = self.train_manager.get_train(vehicle_id)
         if train is None:
-            return
+            return {"ok": False, "reason": "train_not_found", "vehicle_id": vehicle_id}
 
-        traction_level = normalize_driver_traction_level(msg.get("traction_level", 0))
-        brake_level = normalize_driver_traction_level(msg.get("brake_level", 0))
-        has_driver_handle = (
-            msg.get("main_handle_raw") is not None
-            or msg.get("main_handle_state") is not None
-        )
-        raw_brake_level = None
-        if has_driver_handle:
-            traction_level, brake_level = decode_driver_handle(msg)
-            raw_brake_level = (
-                None if msg.get("brake_level") is None else int(msg.get("brake_level"))
+        normalized_message = dict(msg)
+        if msg.get("command") is not None and not any(
+            field in msg
+            for field in (
+                "main_handle_raw",
+                "main_handle_state",
+                "traction_percent",
+                "brake_percent",
             )
-        elif msg.get("command") is not None:
-            traction_level, brake_level = command_percent_to_levels(
-                int(msg.get("command", 0)),
-                float(msg.get("percent", 0.0)),
-            )
-        elif msg.get("brake_level") is not None and int(msg.get("brake_level", 0)) > 4:
-            brake_level = normalize_driver_brake_level(msg.get("brake_level"))
-
-        if brake_level > 0:
-            traction_level = 0
+        ):
+            command = int(msg.get("command", 0))
+            percent = float(msg.get("percent", 0.0))
+            if command == 1:
+                normalized_message["traction_percent"] = percent
+            elif command == 2:
+                normalized_message["brake_percent"] = percent
+        control = decode_driver_control(normalized_message)
 
         direction_code = (
             None if msg.get("direction_code") is None else int(msg["direction_code"])
         )
         direction = msg.get("direction", direction_code_to_text(direction_code))
-        main_handle_raw = msg.get("main_handle_raw")
-        main_handle_state = msg.get("main_handle_state")
-        fast_brake = self._optional_int(main_handle_raw) == 4 or self._optional_int(
-            main_handle_state
-        ) == 4
 
         driver_input = DriverInput(
             vehicle_id=vehicle_id,
             line_id=msg.get("line_id", train.state.line_id),
             source=msg.get("source", "mock"),
             control_mode=msg.get("control_mode", "manual"),
-            traction_level=traction_level,
-            brake_level=brake_level,
+            traction_level=control.traction_level,
+            brake_level=control.brake_level,
             direction=direction,
-            emergency_button=self._optional_bool(msg.get("emergency_button"), False),
+            emergency_button=bool(msg.get("emergency_button", False)),
             command=msg.get("command"),
             percent=msg.get("percent"),
-            main_handle_state=main_handle_state,
-            traction_percent=msg.get("traction_percent"),
-            brake_percent=msg.get("brake_percent"),
+            main_handle_raw=msg.get("main_handle_raw", msg.get("main_handle_state")),
+            main_handle_state=msg.get("main_handle_state"),
+            traction_percent=control.traction_percent,
+            brake_percent=control.brake_percent,
             direction_code=direction_code,
-            main_handle_raw=main_handle_raw,
-            ato_capable=self._optional_bool(msg.get("ato_capable")),
-            ato_active=self._optional_bool(msg.get("ato_active")),
-            ato_start_btn=self._optional_bool(msg.get("ato_start_btn")),
-            emergency_cmd=self._optional_bool(msg.get("emergency_cmd")),
-            key_switch=self._optional_bool(msg.get("key_switch")),
-            network_fault_light=self._optional_bool(msg.get("network_fault_light")),
-            raw_brake_level=raw_brake_level,
-            fast_brake=fast_brake,
+            emergency_cmd=bool(msg.get("emergency_cmd", False)),
+            key_switch=msg.get("key_switch"),
+            ato_start_btn=bool(msg.get("ato_start_btn", False)),
+            ato_capable=msg.get("ato_capable"),
+            ato_active=msg.get("ato_active"),
+            auto_reverse_cap=msg.get("auto_reverse_cap"),
+            auto_reverse_active=msg.get("auto_reverse_active"),
+            auto_rev_flag=bool(msg.get("auto_rev_flag", False)),
+            mode_up_confirm=bool(msg.get("mode_up_confirm", False)),
+            mode_dn_confirm=bool(msg.get("mode_dn_confirm", False)),
+            vigilance=bool(msg.get("vigilance", False)),
+            vigilance_allow=bool(msg.get("vigilance_allow", False)),
+            forced_release=bool(msg.get("forced_release", False)),
+            parking_apply=bool(msg.get("parking_apply", False)),
+            parking_release=bool(msg.get("parking_release", False)),
+            brake_bad_light=msg.get("brake_bad_light"),
+            network_fault_light=msg.get("network_fault_light"),
+            open_left_door=bool(msg.get("open_left_door", False)),
+            open_right_door=bool(msg.get("open_right_door", False)),
+            close_left_door=bool(msg.get("close_left_door", False)),
+            close_right_door=bool(msg.get("close_right_door", False)),
+            door_mode=msg.get("door_mode"),
+            door_closed_light=msg.get("door_closed_light"),
+            high_voltage_light=msg.get("high_voltage_light"),
+            forced_pump=bool(msg.get("forced_pump", False)),
+            horn=bool(msg.get("horn", False)),
+            confirm_flag=bool(msg.get("confirm_flag", False)),
+            trac_aux_reset=bool(msg.get("trac_aux_reset", False)),
+            wash_mode_switch=bool(msg.get("wash_mode_switch", False)),
+            frame_seq=(
+                None if msg.get("frame_seq") is None else int(msg["frame_seq"])
+            ),
+            message_id=(
+                None if msg.get("message_id") is None else str(msg["message_id"])
+            ),
+            raw_brake_level=msg.get("brake_level"),
+            fast_brake=control.handle_mode == "fast_brake",
         )
         train.step_manual(driver_input, self.default_dt)
+        if driver_input.emergency_button or driver_input.emergency_cmd:
+            train.state.emergency_brake = True
+            train.state.mode = "emergency"
+        return {"ok": True, "vehicle_id": vehicle_id}
 
     def _handle_ato_command(self, msg: dict):
         vehicle_id = self._target_vehicle_id(msg)
@@ -176,7 +216,9 @@ class MessageRouter:
 
             ma = MaLimit(
                 vehicle_id=vehicle_id,
-                ma_limit=float(item.get("ma_limit", item.get("ma_limit_m", 0.0))),
+                ma_limit=self._optional_float(
+                    item.get("ma_limit", item.get("ma_limit_m"))
+                ),
                 target_speed=self._optional_float(
                     item.get("target_speed", item.get("target_speed_kmh"))
                 ),
@@ -192,6 +234,9 @@ class MessageRouter:
                 ),
                 permission=item.get("permission"),
                 signal_state=item.get("signal_state"),
+                updated_at=self._timestamp_or_now(
+                    item.get("updated_at", item.get("timestamp", msg.get("timestamp")))
+                ),
             )
             train.apply_ma_state(ma)
 
@@ -207,6 +252,62 @@ class MessageRouter:
         )
         for train in self.train_manager.trains.values():
             train.apply_power_state(power)
+
+    def _handle_speed_constraint(self, msg: dict):
+        vehicle_id = msg.get("vehicle_id")
+        if not vehicle_id:
+            return {"ok": False, "reason": "speed_constraint_requires_vehicle_id"}
+        train = self.train_manager.get_train(str(vehicle_id))
+        if train is None:
+            return {"ok": False, "reason": "train_not_found", "vehicle_id": vehicle_id}
+        raw_limit = msg.get(
+            "speed_limit_kmh",
+            msg.get("allowed_speed_kmh", msg.get("speed_limit")),
+        )
+        if raw_limit is None:
+            return {"ok": False, "reason": "missing_speed_limit"}
+        train.apply_speed_constraint(
+            float(raw_limit),
+            reason=str(msg.get("reason", "external_constraint")),
+            updated_at=self._timestamp_or_now(
+                msg.get("updated_at", msg.get("timestamp"))
+            ),
+        )
+        return {"ok": True, "vehicle_id": vehicle_id}
+
+    def _handle_signal_or_interlocking_state(self, msg: dict):
+        vehicle_id = msg.get("vehicle_id")
+        if not vehicle_id:
+            return {"ok": False, "reason": "safety_state_requires_vehicle_id"}
+        train = self.train_manager.get_train(str(vehicle_id))
+        if train is None:
+            return {"ok": False, "reason": "train_not_found", "vehicle_id": vehicle_id}
+        train.apply_signal_state(
+            signal_state=msg.get("signal_state", msg.get("state")),
+            permission=msg.get("permission", msg.get("movement_permission")),
+        )
+        return {"ok": True, "vehicle_id": vehicle_id}
+
+    def _handle_fault_event(self, msg: dict):
+        fault_type = msg.get("fault_type", msg.get("code"))
+        if not fault_type:
+            return {"ok": False, "reason": "missing_fault_type"}
+        scope_all = msg.get("scope") in {"all", "system"}
+        vehicle_id = msg.get("vehicle_id")
+        if not scope_all and not vehicle_id:
+            return {"ok": False, "reason": "fault_event_requires_vehicle_id_or_scope"}
+        if scope_all:
+            trains = tuple(self.train_manager.trains.values())
+        else:
+            train = self.train_manager.get_train(str(vehicle_id))
+            if train is None:
+                return {"ok": False, "reason": "train_not_found", "vehicle_id": vehicle_id}
+            trains = (train,)
+        active = bool(msg.get("active", msg.get("is_active", True)))
+        severity = str(msg.get("severity", "warning"))
+        for train in trains:
+            train.apply_fault_event(str(fault_type), active=active, severity=severity)
+        return {"ok": True, "affected": len(trains), "fault_type": fault_type}
 
     def _handle_comm_state(self, msg: dict):
         if not self._should_handle_broadcast_or_owned(msg):
@@ -343,19 +444,9 @@ class MessageRouter:
     def _optional_float(self, value):
         return None if value is None else float(value)
 
-    def _optional_int(self, value):
-        return None if value is None else int(value)
-
-    def _optional_bool(self, value, default=None):
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value != 0
-        if isinstance(value, str):
-            return value.strip().lower() in ("1", "true", "yes", "on")
-        return bool(value)
+    def _timestamp_or_now(self, value):
+        timestamp = self._optional_float(value)
+        return time.time() if timestamp is None else timestamp
 
     def _handle_add_train(self, msg: dict):
         if self.owned_vehicle_id is not None:

@@ -78,13 +78,13 @@ def test_rear_vehicle_ma_limit_uses_front_vehicle_safe_distance():
 
     ma_limit = _ma_for(snapshot, "TRAIN-001")
     assert ma_limit["front_vehicle_id"] == "TRAIN-002"
-    assert ma_limit["front_train_length"] == 120.0
+    assert ma_limit["front_train_length"] == 118.0
     assert ma_limit["location_uncertainty"] == 5.0
     assert ma_limit["communication_margin"] == 10.0
     assert ma_limit["safety_margin"] == 30.0
-    assert ma_limit["front_protection_point"] == 455.0
-    assert ma_limit["safe_distance"] == 165.0
-    assert ma_limit["ma_limit"] == 455.0
+    assert ma_limit["front_protection_point"] == 457.0
+    assert ma_limit["safe_distance"] == 163.0
+    assert ma_limit["ma_limit"] == 457.0
     assert ma_limit["required_stop_distance"] == 108.4
     assert ma_limit["emergency_stop_distance"] == 98.1
     assert ma_limit["warning_distance"] == 158.4
@@ -133,8 +133,8 @@ def test_distance_to_ma_between_80_and_200_is_restricted():
     )
 
     ma_limit = _ma_for(snapshot, "TRAIN-001")
-    assert ma_limit["ma_limit"] == 410.0
-    assert ma_limit["distance_to_ma"] == 110.0
+    assert ma_limit["ma_limit"] == 412.0
+    assert ma_limit["distance_to_ma"] == 112.0
     assert ma_limit["permission"] == "restricted"
     assert ma_limit["signal_state"] == "yellow"
     assert 0.0 < ma_limit["speed_limit"] <= ma_limit["route_speed_limit"]
@@ -161,7 +161,7 @@ def test_distance_to_ma_at_or_below_80_is_stop():
     )
 
     ma_limit = _ma_for(snapshot, "TRAIN-001")
-    assert ma_limit["ma_limit"] == 335.0
+    assert ma_limit["ma_limit"] == 337.0
     assert ma_limit["permission"] == "stop"
     assert ma_limit["signal_state"] == "red"
     assert ma_limit["speed_limit"] == 0.0
@@ -341,10 +341,10 @@ def test_signal_evaluate_endpoint_calculates_rear_vehicle_ma_limit():
     assert response.status_code == 200
     ma_limit = _ma_for(response.json(), "TRAIN-001")
     assert ma_limit["front_vehicle_id"] == "TRAIN-002"
-    assert ma_limit["ma_limit"] == 455.0
-    assert ma_limit["front_protection_point"] == 455.0
-    assert ma_limit["distance_to_ma"] == 155.0
-    assert ma_limit["safe_distance"] == 165.0
+    assert ma_limit["ma_limit"] == 457.0
+    assert ma_limit["front_protection_point"] == 457.0
+    assert ma_limit["distance_to_ma"] == 157.0
+    assert ma_limit["safe_distance"] == 163.0
 
 
 def test_signal_evaluate_endpoint_reports_switch_locked_conflict():
