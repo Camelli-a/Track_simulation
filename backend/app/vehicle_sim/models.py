@@ -313,6 +313,10 @@ class MaLimit:
     target_distance_m: Optional[float] = None
     permission: Optional[str] = None
     signal_state: Optional[str] = None
+    speed_limit_reason: Optional[str] = None
+    speed_limit_warning: bool = False
+    upcoming_speed_limit_kmh: Optional[float] = None
+    speed_limit_warning_distance_m: Optional[float] = None
     updated_at: Optional[float] = None
 
 

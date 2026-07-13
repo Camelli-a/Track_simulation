@@ -58,6 +58,10 @@ class Train:
         self.speed_constraint_updated_at = None
         self.permission = None
         self.signal_state = None
+        self.ma_speed_limit_reason = None
+        self.speed_limit_warning = False
+        self.upcoming_speed_limit_kmh = None
+        self.speed_limit_warning_distance_m = None
         self.ma_updated_at = None
         self.ma_timeout_sec = 1.6
         self.power_fault = False
@@ -162,6 +166,7 @@ class Train:
         self.door_dwell_sec = 5.0
         self.door_stop_speed_ms = 0.05
         self.door_stop_tolerance_m = self.train_ato_controller.HOLD_DISTANCE_M
+        self.station_stop_acceptance_tolerance_m = 2.0
         self.door_rearm_distance_m = 2.0
         self.fallback_ato = None
         self.next_stop_target_m = None
@@ -209,6 +214,12 @@ class Train:
             self.target_distance_m = ma_limit.target_distance_m
             self.permission = ma_limit.permission
             self.signal_state = ma_limit.signal_state
+            self.ma_speed_limit_reason = ma_limit.speed_limit_reason
+            self.speed_limit_warning = bool(ma_limit.speed_limit_warning)
+            self.upcoming_speed_limit_kmh = ma_limit.upcoming_speed_limit_kmh
+            self.speed_limit_warning_distance_m = (
+                ma_limit.speed_limit_warning_distance_m
+            )
             self.ma_updated_at = (
                 time.time() if ma_limit.updated_at is None else ma_limit.updated_at
             )
@@ -709,7 +720,7 @@ class Train:
             position_m=self.state.position,
             speed_ms=self.state.speed_ms,
             ma_limit_m=self.ma_limit,
-            allowed_speed_kmh=self._effective_external_allowed_speed(),
+            allowed_speed_kmh=self.get_effective_speed_limit_kmh(),
             stop_target_m=stop_target_m,
             target_distance_m=self.target_distance_m,
             permission=self.permission,
@@ -766,9 +777,17 @@ class Train:
         """Apply door requests and automatic station dwell without integrating motion."""
         stopped = self.state.speed_ms <= self.door_stop_speed_ms
         stop_target_m = self._resolve_stop_target_m()
+        station_tolerance_m = max(
+            self.door_stop_tolerance_m,
+            getattr(
+                self,
+                "station_stop_acceptance_tolerance_m",
+                self.door_stop_tolerance_m,
+            ),
+        )
         at_stop_target = (
             stop_target_m is not None
-            and abs(self.state.position - stop_target_m) <= self.door_stop_tolerance_m
+            and abs(self.state.position - stop_target_m) <= station_tolerance_m
         )
 
         if (
@@ -1229,6 +1248,15 @@ class Train:
         if recommended_speed_kmh is None:
             recommended_speed_kmh = getattr(self, "recommended_speed", None)
 
+        track_speed_limit_kmh = self.track.get_speed_limit(self.state.position)
+        effective_allowed_speed_kmh = None
+        external_allowed_speed_kmh = self._effective_external_allowed_speed()
+        if external_allowed_speed_kmh is not None:
+            effective_allowed_speed_kmh = effective_allowed_speed(
+                external_allowed_speed_kmh,
+                track_speed_limit_kmh,
+            )
+
         legacy_ato_target_speed = getattr(self, "ato_target_speed", None)
         ato_target_speed_kmh = getattr(self, "ato_target_speed_kmh", None)
         if (
@@ -1258,7 +1286,17 @@ class Train:
                 None if ato_target_speed_kmh is None else round(float(ato_target_speed_kmh) / 3.6, 3)
             ),
             "ato_target_speed_kmh": self._round_optional(ato_target_speed_kmh),
-            "allowed_speed_kmh": self._round_optional(self.allowed_speed_kmh),
+            "allowed_speed_kmh": self._round_optional(effective_allowed_speed_kmh),
+            "ma_allowed_speed_kmh": self._round_optional(self.allowed_speed_kmh),
+            "track_speed_limit_kmh": self._round_optional(track_speed_limit_kmh),
+            "speed_limit_reason": self.ma_speed_limit_reason,
+            "speed_limit_warning": bool(self.speed_limit_warning),
+            "upcoming_speed_limit_kmh": self._round_optional(
+                self.upcoming_speed_limit_kmh
+            ),
+            "speed_limit_warning_distance_m": self._round_optional(
+                self.speed_limit_warning_distance_m
+            ),
             "eb_trigger_speed_kmh": self._round_optional(self.eb_trigger_speed_kmh),
             "ma_limit_m": self._round_optional(self.ma_limit),
             "distance_to_ma_m": self._round_optional(distance_to_ma_m),

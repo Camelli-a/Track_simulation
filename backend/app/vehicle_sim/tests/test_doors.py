@@ -70,6 +70,23 @@ def test_station_dwell_completion_advances_to_next_stop_target():
     assert train.next_stop_target_m == 200.0
 
 
+def test_station_dwell_accepts_small_overshoot_and_advances():
+    train = _two_stop_train()
+    train.state.position = 101.96
+    train.state.speed_ms = 0.0
+    train.door_dwell_sec = 0.1
+    train.set_next_stop_target_m(100.0)
+
+    train.step_tick(0.1)
+    assert train.state.door_state == "open"
+
+    train.step_tick(0.1)
+
+    assert train.state.door_state == "closed"
+    assert train._is_completed_stop_target(100.0) is True
+    assert train.next_stop_target_m == 200.0
+
+
 def test_stopped_at_stop_target_opens_holds_then_closes_doors():
     train, _ = _train_and_router()
     train.state.position = _first_stop_position(train)

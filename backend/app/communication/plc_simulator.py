@@ -133,7 +133,9 @@ def handle_client(conn: socket.socket, addr, interval: float):
                 trac_pct    = 0
                 brk_pct     = 60
 
-            emergency_brake = random.random() < 0.005  # 0.5% 概率
+            # Keep the demo PLC stable by default. Random emergency frames can
+            # latch the vehicle into emergency mode and make ATO联调 look broken.
+            emergency_brake = False
 
             frame = build_frame(
                 direction=1,

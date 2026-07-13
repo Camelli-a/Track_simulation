@@ -18,7 +18,7 @@ from app.services.signal_track_config import (
     SWITCHES,
     WARNING_MARGIN,
 )
-from app.services.signal_speed_limit import find_static_speed_limit, resolve_speed_limit
+from app.services.signal_speed_limit import find_static_speed_limit_with_preview, resolve_speed_limit
 
 ROUTE_EXTENSION_AHEAD_M = 1500.0
 LINE_ROUTE_END = max(
@@ -173,12 +173,24 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
 
     distance_to_ma = (ma_limit - vehicle.position) * direction_sign
     signal_rule = _resolve_signal_rule(distance_to_ma, route["speed_limit"], vehicle.speed)
-    static_limit = find_static_speed_limit(vehicle.position)
+    static_limit = find_static_speed_limit_with_preview(
+        vehicle.position,
+        direction_code=vehicle.direction_code,
+        route_speed_limit=route["speed_limit"],
+        decel_mps2=SERVICE_BRAKE_DECELERATION,
+    )
     speed_limit_rule = resolve_speed_limit(
         permission=signal_rule["permission"],
         route_speed_limit=route["speed_limit"],
         static_speed_limit=static_limit.get("speed_limit") if static_limit else None,
         static_speed_limit_id=static_limit.get("limit_id") if static_limit else None,
+        static_speed_limit_preview=bool(static_limit.get("preview")) if static_limit else False,
+        upcoming_static_speed_limit=(
+            static_limit.get("preview_target_speed_limit") if static_limit else None
+        ),
+        speed_limit_warning_distance_m=(
+            static_limit.get("preview_distance_to_start_m") if static_limit else None
+        ),
         fault_speed_limit=vehicle.fault_speed_limit,
         braking_curve_speed_limit=signal_rule["braking_curve_speed_limit"],
         emergency_brake=vehicle.emergency_brake,
@@ -225,6 +237,10 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
         "static_speed_limit_related_switch_id": (
             static_limit.get("related_switch_id") if static_limit else None
         ),
+        "static_speed_limit_preview": speed_limit_rule["static_speed_limit_preview"],
+        "upcoming_static_speed_limit": speed_limit_rule["upcoming_static_speed_limit"],
+        "speed_limit_warning": speed_limit_rule["speed_limit_reason"] == "static_limit_preview",
+        "speed_limit_warning_distance_m": speed_limit_rule["speed_limit_warning_distance_m"],
         "fault_speed_limit": speed_limit_rule["fault_speed_limit"],
         "speed_limit_reason": speed_limit_rule["speed_limit_reason"],
         "required_stop_distance": signal_rule["required_stop_distance"],

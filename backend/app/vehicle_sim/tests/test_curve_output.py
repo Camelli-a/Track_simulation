@@ -74,10 +74,43 @@ def test_curve_point_ma_safety_boundary_fields():
 
     curve_point = train._build_curve_point()
 
-    assert curve_point["allowed_speed_kmh"] == 80.0
+    assert curve_point["allowed_speed_kmh"] == pytest.approx(
+        train.track.get_speed_limit(100.0)
+    )
+    assert curve_point["ma_allowed_speed_kmh"] == 80.0
+    assert curve_point["track_speed_limit_kmh"] == pytest.approx(
+        train.track.get_speed_limit(100.0)
+    )
     assert curve_point["eb_trigger_speed_kmh"] == 90.0
     assert curve_point["ma_limit_m"] == 500.0
     assert curve_point["distance_to_ma_m"] == 400.0
+
+
+def test_curve_point_exposes_speed_limit_preview_warning():
+    _, train = _single_train(position=2035.0)
+    train.apply_ma_state(
+        MaLimit(
+            vehicle_id="TRAIN-001",
+            ma_limit=2500.0,
+            target_speed=35.0,
+            reason="route_end",
+            allowed_speed_kmh=35.0,
+            target_distance_m=465.0,
+            permission="allow",
+            signal_state="green",
+            speed_limit_reason="static_limit_preview",
+            speed_limit_warning=True,
+            upcoming_speed_limit_kmh=35.0,
+            speed_limit_warning_distance_m=19.9,
+        )
+    )
+
+    curve_point = train._build_curve_point()
+
+    assert curve_point["speed_limit_reason"] == "static_limit_preview"
+    assert curve_point["speed_limit_warning"] is True
+    assert curve_point["upcoming_speed_limit_kmh"] == pytest.approx(35.0)
+    assert curve_point["speed_limit_warning_distance_m"] == pytest.approx(19.9)
 
 
 def test_curve_point_stop_target_fields():

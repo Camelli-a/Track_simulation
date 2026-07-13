@@ -83,7 +83,10 @@ class DriverDeskListResponse(BaseModel):
 # main.py reads `vehicle_manager` to wire up the SimulationLoop and the PLC
 # feedback aggregator.
 # ---------------------------------------------------------------------------
-vehicle_manager = TrainManager()
+# FastAPI should not create an in-process TRAIN-001 by default.  The acceptance
+# flow runs TRAIN-001 as its own `main_integrated` process so speed curves and
+# dashboard state are not polluted by two producers with the same vehicle_id.
+vehicle_manager = TrainManager(initial_count=0)
 vehicle_message_router = MessageRouter(vehicle_manager)
 
 
