@@ -328,6 +328,18 @@ def normalize_train(data: Dict[str, Any]) -> Dict[str, Any]:
         if key in data:
             target = TRAIN_FIELD_MAPPING[key]
             _set_converted(normalized, target, data[key], 3.6)
+    if "position_m" in data:
+        _set_converted(normalized, "position_m", data["position_m"], 1.0)
+    if "speed_ms" in data:
+        _set_converted(normalized, "speed_mps", data["speed_ms"], 1.0)
+    if "speed_mps" in data:
+        _set_converted(normalized, "speed_mps", data["speed_mps"], 1.0)
+    if "speed_kmh" in data:
+        _set_converted(normalized, "speed_kmh", data["speed_kmh"], 1.0)
+    if "vehicle_speed_kmh" in data:
+        _set_converted(normalized, "vehicle_speed_kmh", data["vehicle_speed_kmh"], 1.0)
+    if "acceleration_mps2" in data:
+        _set_converted(normalized, "acceleration_mps2", data["acceleration_mps2"], 1.0)
     return normalized
 
 

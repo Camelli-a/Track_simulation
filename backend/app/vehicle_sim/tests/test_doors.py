@@ -1,5 +1,8 @@
 from app.vehicle_sim.message_router import MessageRouter
 from app.vehicle_sim.models import DriverInput
+from app.vehicle_sim.models import TrackSection
+from app.vehicle_sim.track_map import TrackMap
+from app.vehicle_sim.train import Train
 from app.vehicle_sim.train_manager import TrainManager
 
 
@@ -23,12 +26,48 @@ def _manual(**overrides):
     return DriverInput(**values)
 
 
+def _two_stop_train():
+    track = TrackMap(
+        [
+            TrackSection("A", 0.0, 150.0, 0.0, 80.0, "S1", 100.0),
+            TrackSection("B", 150.0, 250.0, 0.0, 80.0, "S2", 200.0),
+        ]
+    )
+    return Train("TRAIN-001", "LINE-1", track, train_index=1)
+
+
 def _first_stop_position(train):
     return next(
         section.stop_position
         for section in train.track.sections
         if section.stop_position is not None
     )
+
+
+def test_train_resolves_next_stop_from_track_before_entering_section():
+    train = _two_stop_train()
+    train.state.position = 0.0
+
+    assert train._resolve_stop_target_m() == 100.0
+
+
+def test_station_dwell_completion_advances_to_next_stop_target():
+    train = _two_stop_train()
+    train.state.position = 100.0
+    train.state.speed_ms = 0.0
+    train.door_dwell_sec = 0.1
+
+    train.step_tick(0.1)
+    assert train.state.door_state == "open"
+
+    train.step_tick(0.1)
+
+    assert train.state.door_state == "closed"
+    assert train._is_completed_stop_target(100.0) is True
+    assert train.next_stop_target_m == 200.0
+
+    train.set_next_stop_target_m(100.0)
+    assert train.next_stop_target_m == 200.0
 
 
 def test_stopped_at_stop_target_opens_holds_then_closes_doors():

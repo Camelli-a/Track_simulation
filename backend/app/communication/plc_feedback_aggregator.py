@@ -86,6 +86,7 @@ class PlcFeedbackAggregator:
             "door_closed_light": door_closed,
             "network_fault": network_fault,
             "ato_capable": bool(state.get("ato_capable", False)),
+            "wash_mode_status": bool(state.get("wash_mode_status", False)),
             "ato_active": bool(state.get("ato_active", False)),
             "auto_reverse_cap": bool(state.get("auto_reverse_cap", False)),
             "auto_reverse_active": bool(state.get("auto_reverse_active", False)),

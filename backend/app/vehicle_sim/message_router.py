@@ -239,6 +239,14 @@ class MessageRouter:
                 ),
             )
             train.apply_ma_state(ma)
+            stop_target_m = self._optional_float(
+                item.get(
+                    "stop_target_m",
+                    item.get("stop_target", item.get("target_position")),
+                )
+            )
+            if stop_target_m is not None:
+                train.set_next_stop_target_m(stop_target_m)
 
     def _handle_power_state(self, msg: dict):
         if not self._should_handle_broadcast_or_owned(msg):

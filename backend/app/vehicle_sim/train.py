@@ -1,3 +1,4 @@
+import math
 import time
 
 from .adapters.command_mapping import command_percent_to_levels
@@ -159,10 +160,11 @@ class Train:
         self.close_right_door_requested = False
         self.door_dwell_sec = 5.0
         self.door_stop_speed_ms = 0.05
-        self.door_stop_tolerance_m = 0.5
+        self.door_stop_tolerance_m = self.train_ato_controller.HOLD_DISTANCE_M
         self.door_rearm_distance_m = 2.0
         self.fallback_ato = None
         self.next_stop_target_m = None
+        self.completed_stop_target_keys: set[float] = set()
         self.recommended_speed_kmh = None
         self.recommended_speed = 0.0
         self._sync_door_state()
@@ -181,6 +183,66 @@ class Train:
             self.ma_updated_at = (
                 time.time() if ma_limit.updated_at is None else ma_limit.updated_at
             )
+
+    def set_next_stop_target_m(self, stop_target_m: float | None) -> None:
+        """Accept a stop target unless this train has already served it."""
+        key = self._stop_target_key(stop_target_m)
+        if key is None:
+            self.next_stop_target_m = None
+            return
+        if key in self.completed_stop_target_keys:
+            return
+        self.next_stop_target_m = float(stop_target_m)
+
+    def _stop_target_key(self, stop_target_m: float | None) -> float | None:
+        try:
+            target = float(stop_target_m)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(target):
+            return None
+        return round(target, 2)
+
+    def _is_completed_stop_target(self, stop_target_m: float | None) -> bool:
+        key = self._stop_target_key(stop_target_m)
+        return key is not None and key in self.completed_stop_target_keys
+
+    def _track_stop_positions(self) -> list[float]:
+        stops: list[float] = []
+        seen: set[float] = set()
+        for section in getattr(self.track, "sections", []):
+            key = self._stop_target_key(getattr(section, "stop_position", None))
+            if key is None or key in seen:
+                continue
+            seen.add(key)
+            stops.append(float(getattr(section, "stop_position")))
+        return stops
+
+    def _find_next_track_stop_m(self, position_m: float | None = None) -> float | None:
+        position = self.state.position if position_m is None else float(position_m)
+        direction_sign = -1 if int(self.state.direction_code) < 0 else 1
+        margin = max(0.0, self.door_stop_tolerance_m)
+        stops = [
+            stop
+            for stop in self._track_stop_positions()
+            if not self._is_completed_stop_target(stop)
+        ]
+        if direction_sign < 0:
+            candidates = [stop for stop in stops if stop < position - margin]
+            return max(candidates) if candidates else None
+        candidates = [stop for stop in stops if stop > position + margin]
+        return min(candidates) if candidates else None
+
+    def _complete_station_stop(self, stop_target_m: float | None) -> None:
+        key = self._stop_target_key(stop_target_m)
+        if key is None:
+            return
+        self.completed_stop_target_keys.add(key)
+        if self._stop_target_key(self.next_stop_target_m) == key:
+            self.next_stop_target_m = None
+        next_target = self._find_next_track_stop_m(self.state.position)
+        if next_target is not None:
+            self.next_stop_target_m = next_target
 
     def validate_ma(self, now: float | None = None) -> MaValidationResult:
         """Return one normalized fail-safe view of the cached MA snapshot."""
@@ -642,7 +704,7 @@ class Train:
     def _update_doors(self, dt: float) -> None:
         """Apply door requests and automatic station dwell without integrating motion."""
         stopped = self.state.speed_ms <= self.door_stop_speed_ms
-        stop_target_m = self.track.get_stop_position(self.state.position)
+        stop_target_m = self._resolve_stop_target_m()
         at_stop_target = (
             stop_target_m is not None
             and abs(self.state.position - stop_target_m) <= self.door_stop_tolerance_m
@@ -680,7 +742,9 @@ class Train:
             self.door_state.open(left=left, right=right, dwell_s=self.door_dwell_sec)
             self.door_state.last_auto_target_m = stop_target_m
         else:
-            self.door_state.tick(dt)
+            closed_after_dwell = self.door_state.tick(dt)
+            if closed_after_dwell:
+                self._complete_station_stop(self.door_state.last_auto_target_m)
 
         self.open_left_door_requested = False
         self.open_right_door_requested = False
@@ -898,10 +962,33 @@ class Train:
         self._update_track_position()
 
     def _resolve_stop_target_m(self) -> float | None:
-        if self.next_stop_target_m is not None:
+        if (
+            self.next_stop_target_m is not None
+            and not self._is_completed_stop_target(self.next_stop_target_m)
+        ):
             return self.next_stop_target_m
+        if (
+            self.next_stop_target_m is not None
+            and self._is_completed_stop_target(self.next_stop_target_m)
+        ):
+            self.next_stop_target_m = None
         if hasattr(self.track, "get_stop_position"):
-            return self.track.get_stop_position(self.state.position)
+            stop_position = self.track.get_stop_position(self.state.position)
+            if (
+                not self._is_completed_stop_target(stop_position)
+                and stop_position is not None
+                and abs(float(stop_position) - self.state.position)
+                <= self.door_stop_tolerance_m
+            ):
+                return stop_position
+        next_track_stop = self._find_next_track_stop_m(self.state.position)
+        if next_track_stop is not None:
+            self.next_stop_target_m = next_track_stop
+            return next_track_stop
+        if hasattr(self.track, "get_stop_position"):
+            stop_position = self.track.get_stop_position(self.state.position)
+            if not self._is_completed_stop_target(stop_position):
+                return stop_position
         return None
 
     def _maybe_generate_stop_result(self) -> None:
@@ -913,9 +1000,17 @@ class Train:
         if self.stop_target_m is None or self.stop_result_published_for_target:
             return
 
+        distance_to_stop_m = abs(self.state.position - self.stop_target_m)
+        holding_state = (
+            self.last_ato_output is not None
+            and self.last_ato_output.ato_state == "holding"
+        )
         if (
             self.state.speed_ms <= self.train_ato_controller.HOLD_SPEED_MS
-            and abs(self.state.position - self.stop_target_m) <= 2.0
+            and (
+                distance_to_stop_m <= self.train_ato_controller.HOLD_DISTANCE_M
+                or holding_state
+            )
         ):
             self.last_stop_result = self.train_ato_controller.evaluate_stop_result(
                 vehicle_id=self.state.vehicle_id,

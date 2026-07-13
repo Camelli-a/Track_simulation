@@ -92,6 +92,7 @@ def test_plc_aggregator_sends_one_complete_cached_snapshot():
             "door_closed_light": True,
             "network_fault": False,
             "ato_capable": True,
+            "wash_mode_status": False,
             "ato_active": True,
             "auto_reverse_cap": True,
             "auto_reverse_active": False,

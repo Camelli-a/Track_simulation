@@ -122,6 +122,7 @@ class DriverInput(BaseModel):
     direction_code: Optional[int] = Field(default=None, ge=0, le=2)
     control_mode: Literal["manual", "ato"] = "manual"
     emergency_button: bool = False
+    emergency_cmd: bool = False
     ato_start_btn: bool = False
     ato_capable: Optional[bool] = None
     ato_active: Optional[bool] = None
@@ -149,6 +150,7 @@ class DriverInput(BaseModel):
     confirm_flag: bool = False
     trac_aux_reset: bool = False
     wash_mode_switch: bool = False
+    wash_mode_status: Optional[bool] = None
     frame_seq: Optional[int] = None
     message_id: Optional[str] = None
     updated_at: float
@@ -167,6 +169,13 @@ class TrainSnapshot(BaseModel):
     position: float = 0.0
     speed: float = 0.0
     acceleration: float = 0.0
+    position_m: Optional[float] = None
+    speed_ms: Optional[float] = None
+    speed_mps: Optional[float] = None
+    speed_kmh: Optional[float] = None
+    vehicle_speed_kmh: Optional[float] = None
+    acceleration_mps2: Optional[float] = None
+    direction: Optional[int] = None
     train_length: Optional[float] = None
     train_index: Optional[int] = None
     mileage: Optional[float] = None
@@ -193,13 +202,30 @@ class TrainSnapshot(BaseModel):
     ato_capable: Optional[bool] = None
     auto_reverse_cap: Optional[bool] = None
     auto_reverse_active: Optional[bool] = None
+    wash_mode_status: Optional[bool] = None
     recommended_speed_kmh: Optional[float] = None
+    recommended_speed_mps: Optional[float] = None
+    ato_target_speed_kmh: Optional[float] = None
+    ato_target_speed_mps: Optional[float] = None
+    ato_state: Optional[str] = None
+    ato_traction_level: Optional[int] = None
+    ato_brake_level: Optional[int] = None
+    commanded_traction_level: Optional[int] = None
+    commanded_brake_level: Optional[int] = None
+    applied_traction_level: Optional[int] = None
+    applied_brake_level: Optional[int] = None
+    atp_intervened: Optional[bool] = None
+    stop_target: Optional[float] = None
+    distance_to_stop: Optional[float] = None
+    stop_result: Optional[Dict[str, Any]] = None
     parking_brake: Optional[bool] = None
     high_voltage_on: Optional[bool] = None
     door_open_light: Optional[bool] = None
     external_speed_limit_kmh: Optional[float] = None
     active_faults: List[str] = Field(default_factory=list)
     door_mode: Optional[str] = None
+    door_state: Optional[str] = None
+    doors_all_closed: Optional[bool] = None
     door_closed_light: Optional[bool] = None
     high_voltage_light: Optional[bool] = None
     brake_bad_light: Optional[bool] = None
@@ -234,6 +260,18 @@ class TrainSnapshot(BaseModel):
     is_stale: bool = False
     stale_after_seconds: Optional[float] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
+    ato_brake_bias: Optional[float] = None
+    ato_brake_bias_enabled: Optional[bool] = None
+    ato_brake_bias_adaptation_enabled: Optional[bool] = None
+    last_brake_bias_adjustment: Optional[Dict[str, Any]] = None
+    brake_bias_history_size: Optional[int] = None
+    curve_output_enabled: Optional[bool] = None
+    curve_history_size: Optional[int] = None
+    curve_point: Optional[Dict[str, Any]] = None
+    input_lights: Dict[str, Any] = Field(default_factory=dict)
+    output_lights: Dict[str, Any] = Field(default_factory=dict)
+    plc_feedback: Dict[str, Any] = Field(default_factory=dict)
+    ato_guidance: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TrackSectionSnapshot(BaseModel):
