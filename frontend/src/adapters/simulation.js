@@ -102,6 +102,9 @@ function normalizeVehicle(v) {
     station_id: v.station_id ?? v.stationId ?? null,
     track_id: v.track_id ?? v.trackId ?? null,
     section_id: v.section_id ?? v.sectionId ?? null,
+    station_yard_section_id: v.station_yard_section_id ?? v.stationYardSectionId ?? null,
+    station_yard_track_id: v.station_yard_track_id ?? v.stationYardTrackId ?? null,
+    station_yard_route_section_ids: v.station_yard_route_section_ids ?? v.stationYardRouteSectionIds ?? [],
     edge_id: v.edge_id ?? v.edgeId ?? null,
     edge_offset_m: v.edge_offset_m ?? v.edgeOffsetM ?? null,
     direction_code: v.direction_code ?? v.directionCode ?? null,
@@ -345,7 +348,7 @@ function sourceLabel(source) {
     COMM: '通信系统',
     BACKEND: '后端服务',
   }
-  return map[source] ?? source ?? '未知来源'
+  return map[source] ?? source ?? '未知鏉ユ簮'
 }
 
 function deriveSystemMode(raw) {
@@ -356,7 +359,7 @@ function deriveSystemMode(raw) {
   return raw.system_mode ?? 'normal'
 }
 
-/** 对标误差 (cm)：优先用 A 组 stop_error_cm，否则前端估算 */
+/** 对标误差 (cm)：优先用后端 stop_error_cm，否则前端估算 */
 export function resolveStopErrorCm(vehicle) {
   if (!vehicle) return null
   if (vehicle.stop_error_cm != null) return Math.round(vehicle.stop_error_cm)
@@ -385,7 +388,7 @@ export function parkingPhaseLabel(phase) {
     cruising: '区间运行',
     approaching: '接近站台',
     braking: '减速制动',
-    docking: '精确对标',
+    docking: '精准对标',
     stopped: '停稳',
   }
   return map[phase] ?? phase ?? '—'
@@ -398,3 +401,4 @@ export function isManualMode(mode) {
 export function isAutomatedParking(mode) {
   return mode === 'ato' || mode === 'atp'
 }
+

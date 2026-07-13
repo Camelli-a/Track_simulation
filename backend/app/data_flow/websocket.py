@@ -20,7 +20,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
     state_store.set_websocket_clients(len(_active_connections))
     try:
         while True:
-            if settings.DATA_SOURCE == "mock":
+            if settings.ENABLE_DASHBOARD_MOCK:
                 mock_dashboard_service.tick()
             snapshot = state_store.get_snapshot()
             await websocket.send_json(snapshot.model_dump(mode="json"))

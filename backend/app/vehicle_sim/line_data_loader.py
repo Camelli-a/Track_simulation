@@ -53,7 +53,7 @@ def build_track_sections(layout: dict[str, Any]) -> list[TrackSection]:
                 section_id=str(section.get("section_id") or section.get("segment_id") or f"SEC-{index:03d}"),
                 start=start,
                 end=end,
-                gradient=float(section.get("gradient", 0.0) or 0.0),
+                gradient=_normalize_gradient_permille(section.get("gradient", 0.0)),
                 speed_limit=speed_limit,
                 station_id=section.get("station_id"),
                 stop_position=_valid_stop_position(section.get("stop_position"), start, end),
@@ -142,6 +142,22 @@ def _normalize_speed_limit_kmh(value: Any) -> float | None:
     if number > 120.0:
         return round(number * 0.036, 3)
     return float(number)
+
+
+def _normalize_gradient_permille(value: Any) -> float:
+    """Return a physically plausible gradient in permille for dynamics.
+
+    Several teacher workbook slope tables store values as tenths of permille:
+    ``300`` means ``30.0‰``.  The converted station-yard section data can still
+    contain those raw values.  Vehicle dynamics must not treat them as 300‰.
+    """
+
+    number = _float_or_none(value)
+    if number is None:
+        return 0.0
+    if abs(number) > 60.0:
+        number = number / 10.0
+    return max(-60.0, min(60.0, float(number)))
 
 
 def _float_or_none(value: Any) -> float | None:

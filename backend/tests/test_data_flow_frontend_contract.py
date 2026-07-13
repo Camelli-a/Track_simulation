@@ -9,6 +9,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from main import app  # noqa: E402
+from app.core.config import settings  # noqa: E402
 
 
 def test_dashboard_snapshot_exposes_frontend_page_contract():
@@ -18,6 +19,8 @@ def test_dashboard_snapshot_exposes_frontend_page_contract():
     data = response.json()
     assert data["integration"]["integration_mode"] in {"simulation", "realtime", "hybrid", "degraded"}
     assert data["integration"]["realtime_channel"] == "websocket"
+    assert data["system"]["data_source"] == "zmq"
+    assert settings.ENABLE_DASHBOARD_MOCK is False
     assert data["scenarios"]
 
     ma_shrink = next(item for item in data["scenarios"] if item["scenario_id"] == "ma_shrink")
@@ -43,20 +46,48 @@ def test_scenarios_endpoint_returns_named_page_config():
     ]
 
 
+def test_scene_state_endpoint_returns_runtime_scene_contract():
+    response = TestClient(app).get("/api/v1/dashboard/scene-state")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "dashboard_scene_state"
+    assert data["active_scene"]["scenario_id"]
+    assert "key_metrics" in data["active_scene"]
+    assert "highlight_events" in data["active_scene"]
+    assert isinstance(data["vehicle_scene_map"], list)
+
+
 def test_station_yards_endpoint_returns_static_layout_for_rendering():
     response = TestClient(app).get("/api/v1/dashboard/stations/yards")
 
     assert response.status_code == 200
     data = response.json()
     assert data["line_id"] == "LINE-1"
-    assert len(data["stations"]) >= 2
+    assert len(data["stations"]) >= 13
+    assert [station["station_name"] for station in data["stations"][:13]] == [
+        "GGZ",
+        "FSP",
+        "KYL",
+        "FTN",
+        "FTD",
+        "QLZ",
+        "LLQ",
+        "LLE",
+        "BWR",
+        "JBG",
+        "BDZ",
+        "BQS",
+        "GTG",
+    ]
 
     station = data["stations"][0]
     assert station["station_id"]
     assert station["track_ids"]
-    assert station["switch_ids"]
     assert station["signal_ids"]
     assert station["section_ids"]
+    assert data["yard_switches"]
+    assert data["yard_signals"]
 
     track = data["yard_tracks"][0]
     assert {"track_id", "track_name", "station_id", "track_type", "direction", "section_ids"} <= set(track)

@@ -185,6 +185,9 @@ class TrainSnapshot(BaseModel):
     section_id: Optional[str] = None
     station_id: Optional[str] = None
     track_id: Optional[str] = None
+    station_yard_section_id: Optional[str] = None
+    station_yard_track_id: Optional[str] = None
+    station_yard_route_section_ids: Optional[List[str]] = None
     edge_offset_m: Optional[float] = None
     mode: TrainMode = "unknown"
     is_running: bool = True
@@ -376,6 +379,11 @@ class MovementAuthoritySnapshot(BaseModel):
     vehicle_id: str
     position: Optional[float] = None
     route_id: str = "R_MAIN"
+    station_id: Optional[str] = None
+    station_name: Optional[str] = None
+    station_yard_section_id: Optional[str] = None
+    station_yard_track_id: Optional[str] = None
+    station_yard_route_section_ids: Optional[List[str]] = None
     ma_limit: float
     distance_to_ma: Optional[float] = None
     permission: MovementPermission = "unknown"

@@ -5,22 +5,20 @@
         <p class="app-section-kicker">Focused Vehicle</p>
         <h3 class="app-section-title">当前关注车辆头部</h3>
         <p class="app-section-copy">
-          这里承接车辆编号、站名、站台、模式、停车阶段和当前关注车辆场景。
+          承接车辆编号、站名、站台、模式、停车阶段和当前关注车辆场景。
         </p>
       </div>
     </div>
 
-    <div
-      v-if="vehicle"
-      class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]"
-    >
+    <div v-if="vehicle" class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
       <article class="rounded-[1.1rem] border border-white/10 bg-white/[0.03] px-4 py-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-[11px] uppercase tracking-[0.24em] text-slate-500">Vehicle</p>
             <h4 class="mt-2 text-lg font-semibold text-slate-100">{{ vehicle.vehicle_id }}</h4>
             <p class="mt-2 text-sm text-slate-400">
-              {{ vehicle.station_name ?? '未知站' }}<span v-if="vehicle.platform_id"> · {{ vehicle.platform_id }}</span>
+              {{ vehicle.station_name ?? '未知站' }}
+              <span v-if="vehicle.platform_id"> · {{ vehicle.platform_id }}</span>
             </p>
           </div>
           <div class="flex flex-wrap gap-2 text-[11px]">
@@ -47,7 +45,7 @@
           </div>
           <div class="app-metric-tile">
             <p class="app-metric-label">目标速度</p>
-            <p class="mt-1 text-sm text-slate-200">{{ vehicle.target_speed != null ? `${Math.round(vehicle.target_speed)} km/h` : '—' }}</p>
+            <p class="mt-1 text-sm text-slate-200">{{ targetSpeedText }}</p>
           </div>
           <div class="app-metric-tile">
             <p class="app-metric-label">更新时间</p>
@@ -101,10 +99,17 @@ import { useOverviewScene } from '@/composables/useOverviewScene'
 const { focusedVehicle: vehicle } = useFocusedVehicle()
 const { focusedVehicleScene: scene } = useOverviewScene()
 
+const targetSpeedText = computed(() => {
+  if (vehicle.value?.target_speed == null) return '—'
+  return `${Math.round(vehicle.value.target_speed)} km/h`
+})
+
 const updatedAtText = computed(() => {
   if (!vehicle.value?.updated_at) return '—'
   const numeric = Number(vehicle.value.updated_at)
-  const timestamp = Number.isFinite(numeric) ? (numeric > 1e12 ? numeric : numeric * 1000) : Date.parse(vehicle.value.updated_at)
+  const timestamp = Number.isFinite(numeric)
+    ? (numeric > 1e12 ? numeric : numeric * 1000)
+    : Date.parse(vehicle.value.updated_at)
   if (!Number.isFinite(timestamp)) return '—'
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
     hour12: false,

@@ -15,6 +15,7 @@ DEFAULT_TOPICS = [
     "comm_state",
     "track_info",
     "fault_event",
+    "set_train_state",
     "add_train",
     "remove_train",
     "clear_trains",

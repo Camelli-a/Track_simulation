@@ -8,8 +8,24 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
 
-    # Data source: mock | udp | zmq
-    DATA_SOURCE: str = "mock"
+    # Legacy display/source hint. The dashboard data path is the ZMQ/state_store
+    # pipeline by default; do not use this as an exclusive runtime mode switch.
+    DATA_SOURCE: str = "zmq"
+
+    # Generate local dashboard demo data only when explicitly enabled.
+    ENABLE_DASHBOARD_MOCK: bool = False
+
+    # Keep the backend subscribed to the internal module bus in normal runs.
+    ENABLE_ZMQ_DASHBOARD_LISTENER: bool = True
+    ENABLE_ZMQ_BROKER_MANAGER: bool = True
+    ENABLE_SIGNAL_ZMQ_ADAPTER: bool = True
+
+    # Local development/demo helper: when a train is added through
+    # /api/v1/vehicle/manage, start one vehicle_sim.main_integrated process for
+    # that train. This is not intended to replace production service
+    # orchestration.
+    ENABLE_VEHICLE_PROCESS_MANAGER: bool = True
+    VEHICLE_PROCESS_DT: float = 0.1
 
     # UDP compatibility settings.
     UDP_HOST: str = "0.0.0.0"

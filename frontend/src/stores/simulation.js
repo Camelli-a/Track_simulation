@@ -30,6 +30,7 @@ const POWER_TRANSITION_LIMIT = 8
 const SNAPSHOT_FALLBACK_MS = 5000
 const SCENE_STATE_POLL_MS = 2500
 const SIGNAL_PROTOCOL_POLL_MS = 4000
+const MANAGED_TRAINS_POLL_MS = 3000
 
 function mergeCollectionById(primary = [], overlay = [], primaryId = 'segment_id', overlayId = primaryId) {
   if (!primary.length) return overlay
@@ -167,6 +168,10 @@ function normalizeManagedTrain(train = {}) {
     mode: train.mode ?? 'manual',
     is_running: Boolean(train.is_running),
     emergency_brake: Boolean(train.emergency_brake),
+    process_managed: Boolean(train.process_managed),
+    process_running: Boolean(train.process_running),
+    process_pid: train.process_pid ?? null,
+    process_log_path: train.process_log_path ?? null,
     updated_at: train.updated_at ?? null,
   }
 }
@@ -211,6 +216,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   let snapshotPollTimer = null
   let sceneStatePollTimer = null
   let signalProtocolPollTimer = null
+  let managedTrainsPollTimer = null
   const lastStopState = new Map()
   const recentEventKeys = new Map()
   const recentMaEventAt = new Map()
@@ -813,6 +819,19 @@ export const useSimulationStore = defineStore('simulation', () => {
     signalProtocolPollTimer = null
   }
 
+  function startManagedTrainsPolling() {
+    if (managedTrainsPollTimer) return
+    managedTrainsPollTimer = setInterval(() => {
+      hydrateManagedTrains({ silent: true }).catch(() => [])
+    }, MANAGED_TRAINS_POLL_MS)
+  }
+
+  function stopManagedTrainsPolling() {
+    if (!managedTrainsPollTimer) return
+    clearInterval(managedTrainsPollTimer)
+    managedTrainsPollTimer = null
+  }
+
   function effectiveSystemMode(snapshot) {
     const systemMode = snapshot?.system?.system_mode
     if (systemMode) return systemMode
@@ -1029,6 +1048,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     ])
     startSceneStatePolling()
     startSignalProtocolPolling()
+    startManagedTrainsPolling()
     wsConnect(handleTick)
   }
 
@@ -1037,6 +1057,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     stopSnapshotPolling()
     stopSceneStatePolling()
     stopSignalProtocolPolling()
+    stopManagedTrainsPolling()
     wsDisconnect()
   }
 

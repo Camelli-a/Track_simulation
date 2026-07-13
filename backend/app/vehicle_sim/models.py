@@ -28,9 +28,15 @@ class TrainState:
     mode: Mode
     is_running: bool
     emergency_brake: bool
+    route_id: str = "R_MAIN"
     train_index: int = 0
     edge_id: Optional[int] = None
     section_id: Optional[str] = None
+    station_id: Optional[str] = None
+    station_name: Optional[str] = None
+    station_yard_section_id: Optional[str] = None
+    station_yard_track_id: Optional[str] = None
+    station_yard_route_section_ids: Optional[list[str]] = None
     edge_offset_m: Optional[float] = None
     direction_code: int = 1
     door_state: str = "closed"
@@ -117,6 +123,7 @@ class TrainState:
             "vehicle_id": self.vehicle_id,
             "train_index": self.train_index,
             "line_id": self.line_id,
+            "route_id": self.route_id,
             "train_length": TRAIN_LENGTH_M,
             "position": round(self.position, 3),
             "speed": round(self.speed_kmh, 3),
@@ -136,6 +143,11 @@ class TrainState:
             "emergency_brake": self.emergency_brake,
             "edge_id": self.edge_id,
             "section_id": self.section_id,
+            "station_id": self.station_id,
+            "station_name": self.station_name,
+            "station_yard_section_id": self.station_yard_section_id,
+            "station_yard_track_id": self.station_yard_track_id,
+            "station_yard_route_section_ids": self.station_yard_route_section_ids,
             "edge_offset_m": (
                 None if self.edge_offset_m is None else round(self.edge_offset_m, 3)
             ),

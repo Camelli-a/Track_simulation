@@ -58,10 +58,17 @@ npm run dev
 修改 `backend/.env` 中的 `DATA_SOURCE` 字段：
 
 ```
-DATA_SOURCE=mock   # 当前：Mock 随机数据
-DATA_SOURCE=udp    # 切换为 UDP 真实设备
-DATA_SOURCE=zmq    # 切换为 ZMQ 真实设备
+DATA_SOURCE=zmq
+ENABLE_DASHBOARD_MOCK=false
+ENABLE_ZMQ_DASHBOARD_LISTENER=true
 ```
+
+当前架构中，ZMQ 是系统内部统一总线，不是可选“模式”。`DATA_SOURCE`
+只保留为兼容字段和状态显示；是否生成演示数据由
+`ENABLE_DASHBOARD_MOCK` 控制。真实联调时保持 mock 关闭，由车辆、信号、
+司机台等模块向 ZMQ 发布真实 `train_state` / `ma_state` / `signal_state`
+等消息，后端 `data_flow` 订阅并写入 `state_store`，前端只消费统一的
+`dashboard_snapshot`。
 
 UDP / ZMQ 接入点位于各 `app/services/*_service.py` 的 `elif self.source == "udp"` 分支中。
 
