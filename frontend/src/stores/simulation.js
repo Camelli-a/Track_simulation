@@ -2,9 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { getVehicleColor, pruneVehicleColors } from '@/utils/vehicleColors'
-import { normalizeTick, resolveStopErrorCm } from '@/adapters/simulation'
+import { normalizeSceneState, normalizeTick, resolveStopErrorCm } from '@/adapters/simulation'
 import { normalizeSignalStatus } from '@/adapters/signalApi'
-import { fetchDashboardSnapshot, publishTrackInfo } from '@/api/dashboard'
+import { fetchDashboardSceneState, fetchDashboardSnapshot, publishTrackInfo } from '@/api/dashboard'
 import { getSignalStatus } from '@/api/signal'
 import { sendVehicleControl } from '@/api/vehicleControl'
 import { getManagedTrains, getVehicleStatus, manageVehicle } from '@/api/vehicle'
@@ -28,6 +28,7 @@ const MA_EVENT_COOLDOWN_MS = 8000
 const CONTROL_HISTORY_LIMIT = 20
 const POWER_TRANSITION_LIMIT = 8
 const SNAPSHOT_FALLBACK_MS = 5000
+const SCENE_STATE_POLL_MS = 2500
 const SIGNAL_PROTOCOL_POLL_MS = 4000
 
 function mergeCollectionById(primary = [], overlay = [], primaryId = 'segment_id', overlayId = primaryId) {
@@ -80,6 +81,74 @@ function applyAuthorityToVehicle(vehicle, authority) {
   }
 }
 
+function segmentDistanceToVehicle(segment, vehicle) {
+  const start = Number(segment?.start ?? 0)
+  const end = Number(segment?.end ?? start)
+  const position = Number(vehicle?.position ?? start)
+  const midpoint = (start + end) / 2
+  return Math.abs(midpoint - position)
+}
+
+function resolveVehicleReferenceSegment(vehicle, segments = []) {
+  if (!vehicle?.vehicle_id || !segments.length) return null
+
+  const exactSectionId = vehicle.section_id != null ? String(vehicle.section_id) : null
+  if (exactSectionId) {
+    const exactSection = segments.find((segment) =>
+      String(segment.section_id ?? segment.segment_id) === exactSectionId,
+    )
+    if (exactSection) return exactSection
+  }
+
+  const occupiedSegments = segments.filter((segment) =>
+    String(segment.occupied_by ?? segment.vehicle_id ?? '') === String(vehicle.vehicle_id),
+  )
+  if (vehicle.track_id) {
+    const exactTrack = occupiedSegments.find((segment) =>
+      String(segment.track_id ?? '') === String(vehicle.track_id),
+    )
+    if (exactTrack) return exactTrack
+  }
+  if (occupiedSegments.length === 1) return occupiedSegments[0]
+  if (occupiedSegments.length > 1) {
+    return [...occupiedSegments].sort((a, b) =>
+      segmentDistanceToVehicle(a, vehicle) - segmentDistanceToVehicle(b, vehicle),
+    )[0]
+  }
+
+  const positionSegments = segments.filter((segment) =>
+    vehicle.position != null
+    && vehicle.position >= Number(segment.start ?? 0)
+    && vehicle.position < Number(segment.end ?? 0),
+  )
+  if (vehicle.track_id) {
+    const exactTrack = positionSegments.find((segment) =>
+      String(segment.track_id ?? '') === String(vehicle.track_id),
+    )
+    if (exactTrack) return exactTrack
+  }
+  if (positionSegments.length === 1) return positionSegments[0]
+  if (positionSegments.length > 1) {
+    return [...positionSegments].sort((a, b) =>
+      segmentDistanceToVehicle(a, vehicle) - segmentDistanceToVehicle(b, vehicle),
+    )[0]
+  }
+
+  return null
+}
+
+function hydrateVehicleTrackReference(vehicle, segments = []) {
+  const reference = resolveVehicleReferenceSegment(vehicle, segments)
+  if (!reference) return vehicle
+
+  return {
+    ...vehicle,
+    section_id: vehicle.section_id ?? reference.section_id ?? reference.segment_id ?? null,
+    track_id: vehicle.track_id ?? reference.track_id ?? null,
+    station_id: vehicle.station_id ?? reference.station_id ?? null,
+  }
+}
+
 function toEpochMs(value) {
   if (value == null) return null
   const numeric = Number(value)
@@ -110,6 +179,7 @@ function normalizeManagedTrainList(payload) {
 
 export const useSimulationStore = defineStore('simulation', () => {
   const tick = ref(null)
+  const sceneState = ref(null)
   const signalProtocol = ref(null)
   const selectedVehicleId = ref(null)
   const lastTickAt = ref(0)
@@ -139,6 +209,7 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   let staleTimer = null
   let snapshotPollTimer = null
+  let sceneStatePollTimer = null
   let signalProtocolPollTimer = null
   const lastStopState = new Map()
   const recentEventKeys = new Map()
@@ -147,6 +218,8 @@ export const useSimulationStore = defineStore('simulation', () => {
   let controlCounter = 0
 
   const communication = computed(() => tick.value?.communication ?? null)
+  const scenarios = computed(() => tick.value?.scenarios ?? [])
+  const backendSceneState = computed(() => sceneState.value)
   const protocolMessageAt = computed(() => toEpochMs(communication.value?.last_message_at))
   const driverInputs = computed(() => tick.value?.driver_inputs ?? [])
   const atoCommands = computed(() => tick.value?.ato_commands ?? [])
@@ -161,9 +234,11 @@ export const useSimulationStore = defineStore('simulation', () => {
   )
 
   const vehicles = computed(() =>
-    (tick.value?.vehicles ?? []).map((vehicle) =>
-      applyAuthorityToVehicle(vehicle, maStateByVehicleId.value.get(vehicle.vehicle_id)),
-    )
+    (tick.value?.vehicles ?? [])
+      .map((vehicle) =>
+        applyAuthorityToVehicle(vehicle, maStateByVehicleId.value.get(vehicle.vehicle_id)),
+      )
+      .map((vehicle) => hydrateVehicleTrackReference(vehicle, dynamicTrackSegments.value))
   )
 
   const managedTrainById = computed(() =>
@@ -208,6 +283,13 @@ export const useSimulationStore = defineStore('simulation', () => {
     || lineLayout.totalLength
     || tick.value?.total_length
     || 5000
+  )
+
+  const lineId = computed(() =>
+    tick.value?.track_info?.line_id
+    || lineLayout.lineId
+    || tick.value?.line_id
+    || 'LINE-1'
   )
 
   const stations = computed(() => {
@@ -404,6 +486,11 @@ export const useSimulationStore = defineStore('simulation', () => {
         title: `${vehicleId} 已执行${label}`,
         message: `指令来源：${cmd.source ?? 'keyboard'}`,
       })
+      return {
+        ok: true,
+        vehicleId,
+        label,
+      }
     } catch (err) {
       const errorMessage = err.response?.data?.detail ?? err.message
       updateControlHistory(historyId, {
@@ -423,6 +510,12 @@ export const useSimulationStore = defineStore('simulation', () => {
         message: errorMessage,
         duration: 3800,
       })
+      return {
+        ok: false,
+        vehicleId,
+        label,
+        error: errorMessage,
+      }
     }
   }
 
@@ -659,6 +752,16 @@ export const useSimulationStore = defineStore('simulation', () => {
     }
   }
 
+  async function hydrateSceneState() {
+    try {
+      sceneState.value = normalizeSceneState(await fetchDashboardSceneState())
+      return true
+    } catch (err) {
+      console.warn('[Simulation] scene-state fallback failed', err?.message ?? err)
+      return false
+    }
+  }
+
   async function hydrateSignalProtocol() {
     try {
       signalProtocol.value = normalizeSignalStatus(await getSignalStatus())
@@ -682,6 +785,19 @@ export const useSimulationStore = defineStore('simulation', () => {
     if (!snapshotPollTimer) return
     clearInterval(snapshotPollTimer)
     snapshotPollTimer = null
+  }
+
+  function startSceneStatePolling() {
+    if (sceneStatePollTimer) return
+    sceneStatePollTimer = setInterval(() => {
+      hydrateSceneState()
+    }, SCENE_STATE_POLL_MS)
+  }
+
+  function stopSceneStatePolling() {
+    if (!sceneStatePollTimer) return
+    clearInterval(sceneStatePollTimer)
+    sceneStatePollTimer = null
   }
 
   function startSignalProtocolPolling() {
@@ -907,9 +1023,11 @@ export const useSimulationStore = defineStore('simulation', () => {
     await lineLayout.loadLayout()
     await Promise.all([
       hydrateFromSnapshot(),
+      hydrateSceneState(),
       hydrateSignalProtocol(),
       hydrateManagedTrains({ silent: true }).catch(() => []),
     ])
+    startSceneStatePolling()
     startSignalProtocolPolling()
     wsConnect(handleTick)
   }
@@ -917,6 +1035,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   function disconnect() {
     if (staleTimer) clearTimeout(staleTimer)
     stopSnapshotPolling()
+    stopSceneStatePolling()
     stopSignalProtocolPolling()
     wsDisconnect()
   }
@@ -960,6 +1079,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     vehicles,
     trackSegments,
     stations,
+    lineId,
     totalLength,
     slopeProfile,
     rawBlocks: computed(() => lineLayout.rawBlocks),
@@ -970,6 +1090,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     dataSource,
     protocolVersion,
     communication,
+    scenarios,
+    sceneState: backendSceneState,
     protocolMessageAt,
     driverInputs,
     atoCommands,
@@ -990,6 +1112,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     hydrateManagedTrains,
     submitVehicleManage,
     hydrateFromSnapshot,
+    hydrateSceneState,
     connect,
     disconnect,
   }

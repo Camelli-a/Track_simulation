@@ -3,11 +3,11 @@
     class="app-shell"
     :class="{ 'presentation-mode': ui.presentationMode, 'mode-emergency': isEmergency }"
   >
-    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.12),transparent_22%),linear-gradient(180deg,rgba(15,23,42,0.85),rgba(2,6,23,0.96))]" />
+    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(125,211,252,0.18),transparent_26%),radial-gradient(circle_at_82%_14%,rgba(251,191,36,0.08),transparent_18%),linear-gradient(180deg,rgba(14,28,51,0.6),rgba(9,19,33,0.9))]" />
 
     <div
       v-if="!ui.presentationMode && ui.navOpen"
-      class="fixed inset-0 z-30 bg-slate-950/65 backdrop-blur-sm lg:hidden"
+      class="fixed inset-0 z-30 bg-slate-950/45 backdrop-blur-sm lg:hidden"
       @click="ui.closeNav()"
     />
 
@@ -25,7 +25,7 @@
             轨道仿真系统
           </h1>
           <p class="mt-2 max-w-[16rem] text-xs leading-5 text-slate-400">
-            面向调度员的三视角工作台：全线态势、列车驾驶室、供电与故障。
+            面向调度员的四页工作台：运行总览、停车控制、信号联锁、故障演示。
           </p>
         </div>
         <button
@@ -49,9 +49,11 @@
       </div>
 
       <nav class="mt-6 space-y-3">
-        <NavItem to="/line" label="全线态势" icon="◫" hint="线路、信号、联锁与 MA 总览" />
-        <NavItem to="/cab" label="列车驾驶室" icon="▣" hint="单车监督、制动曲线与控车反馈" />
-        <NavItem to="/power" label="供电与故障" icon="⌁" hint="网压健康、分车负荷与故障回放" />
+        <NavItem to="/vehicle-status" label="车辆状况" icon="⊙" hint="速度曲线、运行状态与车辆诊断" />
+        <NavItem to="/line" label="运行总览" icon="◫" hint="线路主视图、当前场景与受影响车辆" />
+        <NavItem to="/cab" label="停车控制" icon="▣" hint="单车监督、制动曲线、ATO/ATP 与停车结果" />
+        <NavItem to="/signal" label="信号与联锁" icon="⌘" hint="MA 约束摘要、前方约束链与联锁冲突" />
+        <NavItem to="/fault" label="故障演示" icon="⟟" hint="异常触发、活动事件、影响摘要与演示动作" />
       </nav>
 
       <div class="mt-auto space-y-3">
@@ -92,7 +94,7 @@
       <div class="flex min-h-screen w-full flex-col px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
         <header v-if="!ui.presentationMode" class="mb-5">
           <div class="app-topbar">
-            <div class="flex items-start gap-3">
+            <div class="flex items-center gap-3">
               <button
                 type="button"
                 class="mt-1 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300 lg:hidden"
@@ -100,29 +102,9 @@
               >
                 菜单
               </button>
-              <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">
-                  {{ route.meta.section ?? 'System View' }}
-                </p>
-                <h2 class="mt-2 text-2xl font-semibold tracking-[0.04em] text-white">
-                  {{ route.meta.title ?? '轨道仿真系统' }}
-                </h2>
-                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                  {{ route.meta.subtitle }}
-                </p>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <ConnectionBadge
-                :connected="sim.connected"
-                :connecting="sim.connecting"
-                :data-stale="sim.dataStale"
-              />
-              <span class="app-chip">{{ modeLabel }}</span>
-              <span v-if="sim.dataSource" class="app-chip">{{ sim.dataSource }}</span>
-              <span class="app-chip">{{ freshnessLabel }}</span>
-              <span class="app-chip">{{ clockLabel }}</span>
+              <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">
+                {{ route.meta.title ?? '轨道仿真系统' }}
+              </h2>
             </div>
           </div>
         </header>
@@ -134,28 +116,10 @@
             :data-stale="sim.dataStale"
             :freshness-label="freshnessLabel"
             :message-time-label="messageTimeLabel"
-            :scene-label="ui.sceneLabel"
-            :mode-label="modeLabel"
-            :data-source="sim.dataSource"
-            :zmq-connected="sim.systemInfo?.zmq_connected ?? sim.communication?.zmq_connected ?? null"
-            :websocket-clients="sim.systemInfo?.websocket_clients ?? null"
-            :latency-label="latencyLabel"
-            :protocol-version="sim.protocolVersion"
+            :access-status-label="accessStatus.label"
+            :access-status-tone="accessStatus.tone"
           />
         </div>
-
-        <SystemAlertBar
-          class="mb-4"
-          :connected="sim.connected"
-          :connecting="sim.connecting"
-          :data-stale="sim.dataStale"
-          :system-mode="sim.systemMode"
-          :power-fault="sim.power?.is_fault ?? false"
-          :last-error="sim.lastError"
-          :alarms="sim.alarms"
-          :comm-state="sim.communication"
-          :route-results="sim.routeResults"
-        />
 
         <div class="flex-1">
           <RouterView />
@@ -181,7 +145,6 @@ import ConfirmActionDialog from '@/components/ConfirmActionDialog.vue'
 import GlobalStatusStrip from '@/components/GlobalStatusStrip.vue'
 import NavItem from '@/components/NavItem.vue'
 import PresentationToggle from '@/components/PresentationToggle.vue'
-import SystemAlertBar from '@/components/SystemAlertBar.vue'
 import { useLayoutSimulation } from '@/composables/usePageSimulation'
 import { useKeyboardControl } from '@/composables/useKeyboardControl'
 import { useUiStore } from '@/stores/ui'
@@ -197,15 +160,40 @@ const clockLabel = computed(() => formatClock(currentTime.value))
 const messageTimeLabel = computed(() =>
   sim.protocolMessageAt ? formatClock(sim.protocolMessageAt) : null
 )
-const latencyLabel = computed(() =>
-  sim.communication?.latency_ms != null ? `${Number(sim.communication.latency_ms).toFixed(1)} ms` : null
-)
 
 const modeLabel = computed(() => {
   if (sim.systemMode === 'emergency') return '紧急模式'
   if (sim.systemMode === 'degraded') return '降级运行'
   if (sim.systemMode === 'offline') return '离线待机'
   return '正常运行'
+})
+
+const accessStatus = computed(() => {
+  if (sim.dataSource === 'mock') {
+    return {
+      label: '模拟数据演示',
+      tone: 'mock',
+    }
+  }
+
+  if (sim.communication?.driver_console_connected && sim.communication?.source !== 'mock') {
+    return {
+      label: '已接司机台硬件',
+      tone: 'hardware',
+    }
+  }
+
+  if (sim.connected || sim.connecting) {
+    return {
+      label: '后端在线，未接硬件',
+      tone: 'warning',
+    }
+  }
+
+  return {
+    label: '等待后端识别',
+    tone: 'neutral',
+  }
 })
 
 const freshnessLabel = computed(() => {
@@ -219,6 +207,9 @@ const freshnessLabel = computed(() => {
 const keyboardHint = computed(() => {
   if (route.path === '/cab') {
     return '手动模式车辆可使用 ↑ 牵引、↓ 制动、Space 紧急制动。'
+  }
+  if (route.path === '/fault') {
+    return '故障演示页以触发和观察为主；真实控制动作会要求二次确认。'
   }
   return '当前页以监视为主；若需控车，请切换到“列车驾驶室”页面。'
 })

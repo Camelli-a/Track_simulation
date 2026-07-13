@@ -1,15 +1,14 @@
 import json
 import time
 
-from .mock_data import DEFAULT_TRACK
+from .line_data_loader import build_track_map_from_line_layout
 from .models import AtoCommand
 from .models import MaLimit
-from .track_map import TrackMap
 from .train import Train
 
 
 def main():
-    track = TrackMap(DEFAULT_TRACK)
+    track = build_track_map_from_line_layout()
     train = Train("TRAIN-001", "LINE-1", track)
 
     dt = 0.1

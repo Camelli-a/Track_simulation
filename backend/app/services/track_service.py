@@ -6,20 +6,44 @@ from app.schemas.track import TrackStatus, TrackSegment
 class TrackService(BaseService):
 
     def get_status(self) -> TrackStatus:
-        if self.source == "mock":
-            return self._mock_status()
-        elif self.source == "udp":
-            raise NotImplementedError("UDP 数据源尚未实现")
-        elif self.source == "zmq":
-            raise NotImplementedError("ZMQ 数据源尚未实现")
-        else:
-            raise ValueError(f"未知数据源: {self.source}")
+        # 不论 DATA_SOURCE 是什么，数据始终来自 state_store（ZMQ 聚合层）
+        # state_store 无数据时降级返回静态 mock
+        return self._live_status()
 
     def get_segments(self):
-        return self._mock_status().segments
+        return self.get_status().segments
 
     # ------------------------------------------------------------------
-    # Mock 数据
+    # 实时数据：从 state_store 读区间占用状态
+    # ------------------------------------------------------------------
+    def _live_status(self) -> TrackStatus:
+        try:
+            from app.data_flow.state_store import state_store
+            snapshot = state_store.get_snapshot()
+            if snapshot.sections:
+                segments = [
+                    TrackSegment(
+                        segment_id=sec.section_id,
+                        start=sec.start,
+                        end=sec.end,
+                        condition=sec.condition or "normal",
+                    )
+                    for sec in sorted(snapshot.sections, key=lambda s: s.start)
+                ]
+                total_length = max((s.end for s in snapshot.sections), default=0.0)
+                fault_count = sum(1 for s in snapshot.sections if s.condition == "fault")
+                return TrackStatus(
+                    timestamp=time.time(),
+                    total_length=total_length,
+                    segments=segments,
+                    fault_count=fault_count,
+                )
+        except Exception:
+            pass
+        return self._mock_status()
+
+    # ------------------------------------------------------------------
+    # 静态 mock（state_store 尚无数据时使用）
     # ------------------------------------------------------------------
     @staticmethod
     def _mock_status() -> TrackStatus:

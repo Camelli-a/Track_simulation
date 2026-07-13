@@ -17,7 +17,8 @@ param(
     [double]$Spacing = 300.0,
     [double]$Dt = 0.1,
     [switch]$NoZmq,
-    [int]$Steps = 0
+    [int]$Steps = 0,
+    [string]$LineLayout = ""
 )
 
 Set-StrictMode -Version Latest
@@ -65,6 +66,9 @@ Write-Host "project_root=$ProjectRoot"
 Write-Host "backend_dir=$BackendDir"
 Write-Host "python=$PythonExe"
 Write-Host "count=$Count spacing=$Spacing dt=$Dt no_zmq=$($NoZmq.IsPresent) steps=$Steps"
+if ($LineLayout) {
+    Write-Host "line_layout=$LineLayout"
+}
 
 $processes = @()
 
@@ -80,6 +84,10 @@ for ($i = 1; $i -le $Count; $i++) {
         "--initial-position", "$InitialPosition",
         "--dt", "$Dt"
     )
+
+    if ($LineLayout) {
+        $Arguments += @("--line-layout", "$LineLayout")
+    }
 
     if ($NoZmq.IsPresent) {
         $Arguments += "--no-zmq"

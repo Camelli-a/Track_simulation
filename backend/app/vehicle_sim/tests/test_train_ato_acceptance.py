@@ -42,14 +42,23 @@ def _assert_levels_are_safe(train):
     assert not (train.applied_traction_level > 0 and train.applied_brake_level > 0)
 
 
+def _next_stop_after(train, position_m=0.0):
+    return next(
+        section.stop_position
+        for section in train.track.sections
+        if section.stop_position is not None and section.stop_position > position_m
+    )
+
+
 def test_am_ato_can_generate_stop_result_or_reach_holding_state():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
+    target = _next_stop_after(train, 500.0)
     train.driving_mode = "AM"
-    train.state.position = 1400.0
+    train.state.position = target - 100.0
     train.state.speed_ms = 8.0
-    train.next_stop_target_m = 1500.0
-    _apply_ma(train)
+    train.next_stop_target_m = target
+    _apply_ma(train, ma_limit=target + 300.0, target_distance=300.0)
 
     accepted = False
     for _ in range(2000):
@@ -59,7 +68,7 @@ def test_am_ato_can_generate_stop_result_or_reach_holding_state():
         if (
             train.state.stop_result is not None
             or train.ato_state == "holding"
-            or (abs(train.state.position - 1500.0) < 20.0 and train.state.speed_ms < 2.0)
+            or (abs(train.state.position - target) < 20.0 and train.state.speed_ms < 2.0)
         ):
             accepted = True
             break
@@ -213,7 +222,7 @@ def test_train_state_protocol_contains_minimum_ato_fields():
 
 
 def test_multi_train_ato_instances_are_isolated():
-    manager = TrainManager()
+    manager = TrainManager(initial_count=2)
     train_am = manager.get_train("TRAIN-001")
     train_sm = manager.get_train("TRAIN-002")
 

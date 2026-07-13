@@ -1,4 +1,5 @@
 import time
+
 from app.services.base_service import BaseService
 from app.schemas.signal import SignalEvaluateRequest, SignalStatus
 from app.services.signal_control import calculate_signal_snapshot
@@ -30,7 +31,7 @@ class SignalService(BaseService):
         )
 
     # ------------------------------------------------------------------
-    # Mock 数据
+    # Mock：B 组 signal_control 算法（5 区段演示线）
     # ------------------------------------------------------------------
     @staticmethod
     def _mock_status() -> SignalStatus:

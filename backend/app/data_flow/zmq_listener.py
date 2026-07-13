@@ -45,10 +45,11 @@ class ZmqDashboardListener:
     """
 
     def __init__(self, address: str | None = None) -> None:
-        self.address = address or getattr(
-            settings,
-            "ZMQ_BROKER_FRONTEND",
-            settings.ZMQ_ADDRESS,
+        self.address = (
+            address
+            or getattr(settings, "ZMQ_BROKER_FRONTEND", None)
+            or getattr(settings, "ZMQ_ADDRESS", None)
+            or getattr(settings, "zmq_address", "tcp://127.0.0.1:5555")
         )
         self._task: asyncio.Task | None = None
         self._running = False

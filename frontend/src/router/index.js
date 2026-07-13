@@ -7,8 +7,18 @@ const routes = [
     children: [
       { path: '', redirect: '/line' },
       {
+        path: 'vehicle-status',
+        component: () => import('@/views/VehicleStatusView.vue'),
+        meta: {
+          title: '车辆状况',
+          section: '车辆状况',
+          subtitle: '汇总列车实时运行状态，含速度曲线与前向预测；后续扩展更多车辆诊断视图。',
+          opsHint: '速度曲线按 1 秒轮询后端接口，预测曲线基于当前驾驶指令前向仿真，可按需切换显示。',
+        },
+      },
+      {
         path: 'line',
-        component: () => import('@/views/DashboardView.vue'),
+        component: () => import('@/views/OverviewView.vue'),
         meta: {
           title: '全线态势',
           section: '线路底座',
@@ -18,28 +28,56 @@ const routes = [
       },
       {
         path: 'cab',
-        component: () => import('@/views/VehicleView.vue'),
+        component: () => import('@/views/StoppingControlView.vue'),
         meta: {
-          title: '列车驾驶室',
+          title: '停车控制',
           section: '车端状态',
-          subtitle: '聚焦单车驾驶与监督，查看速度、MA、制动曲线和控制反馈。',
-          opsHint: '先选车，再核对速度与 MA 裕量；普通牵引/制动只对手动模式车辆开放。',
+          subtitle: '聚焦单车停车控制与诊断，查看场景关键指标、控制来源、ATP 保护和停车结果。',
+          opsHint: '先从运行总览页选中车辆，再在这里核对速度、MA、控制来源和 ATP 介入情况。',
+        },
+      },
+      {
+        path: 'signal',
+        component: () => import('@/views/SignalConstraintView.vue'),
+        meta: {
+          title: '信号与联锁',
+          section: '线路约束',
+          subtitle: '解释当前车辆为什么收到现在这条 MA，信号、区段、道岔和进路哪一环在约束它。',
+          opsHint: '先看信号约束摘要，再看前方约束链和联锁冲突列表，最后用 MA 来源解释组织讲解。',
+        },
+      },
+      {
+        path: 'fault',
+        component: () => import('@/views/FaultInjectionView.vue'),
+        meta: {
+          title: '故障注入与演示控制',
+          section: '演示控制',
+          subtitle: '聚焦异常触发、演示动作和结果确认，把“怎么触发”和“触发后发生了什么”放在同一页。',
+          opsHint: '优先使用已接后端的真实演示动作；待后端补接口的注入项当前只做能力占位和对接提示。',
         },
       },
       {
         path: 'power',
         component: () => import('@/views/PowerView.vue'),
         meta: {
-          title: '供电与故障',
-          section: '边界约束',
-          subtitle: '围绕网压健康、分车负荷、回馈制动和故障回放观察供电边界。',
-          opsHint: '先看电压趋势，再看分车功率排行和故障前后对比，快速判断影响范围。',
+          title: '供电页（兼容）',
+          section: '兼容入口',
+          subtitle: '保留旧版供电监测页面，便于迁移期间对照使用。',
+          opsHint: '该页面当前不在主导航中；若需保留供电视角，可后续再并入新的四页结构。',
         },
       },
       { path: 'dashboard', redirect: '/line' },
       { path: 'track', redirect: '/line' },
-      { path: 'signal', redirect: '/line' },
-      { path: 'vehicle', redirect: '/cab' },
+      {
+        path: 'vehicle',
+        component: () => import('@/views/VehicleView.vue'),
+        meta: {
+          title: '列车驾驶室（旧版）',
+          section: '兼容入口',
+          subtitle: '保留旧版车辆管理与控车页面，便于迁移期间对照使用。',
+          opsHint: '该页面仍保留旧的车辆管理和控车逻辑，后续会逐步并入新的停车控制页。',
+        },
+      },
     ],
   },
 ]
