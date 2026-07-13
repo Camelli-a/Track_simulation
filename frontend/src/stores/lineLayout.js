@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { fetchDashboardSnapshot, fetchStationYards } from '@/api/dashboard'
+import {
+  fetchDashboardSnapshot,
+  fetchLineLayout,
+  fetchStationYards,
+  fetchStationYardsV2,
+} from '@/api/dashboard'
 
 function normalizeInfrastructureSection(section = {}) {
   const sectionId = section.section_id ?? section.segment_id ?? null
@@ -85,9 +90,12 @@ function buildStationsFromBackend({ sections = [], yardLayout = null, localStati
   const yardStations = Array.isArray(yardLayout?.stations) ? yardLayout.stations : []
   const localById = buildStationSeedMap(localStations)
   const byId = new Map()
+  const yardStationIds = new Set(yardStations.map((station) => station.station_id))
+  const shouldPreferYardStations = yardStations.length > 0
 
   for (const section of sections) {
     if (!section.station_id) continue
+    if (shouldPreferYardStations && !yardStationIds.has(section.station_id)) continue
     const current = byId.get(section.station_id) ?? {
       station_id: section.station_id,
       name: section.station_id,
@@ -125,7 +133,10 @@ function buildStationsFromBackend({ sections = [], yardLayout = null, localStati
     }
   })
 
-  return stations.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  const sortedStations = stations.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  if (!shouldPreferYardStations) return sortedStations
+
+  return sortedStations.filter((station) => yardStationIds.has(station.station_id))
 }
 
 function buildSignalsFromYard({ yardLayout = null, stations = [] }) {
@@ -160,8 +171,12 @@ function buildTurnoutsFromYard({ yardLayout = null, stations = [], stationTransf
     const transform = stationTransforms?.get(turnout.station_id) ?? null
     const projected = projectYardPoint(turnout.geometry, transform)
     return {
-      turnout_id: turnout.switch_id,
+      turnout_id: turnout.turnout_id ?? turnout.switch_id,
       switch_id: turnout.switch_id,
+      switch_uid: turnout.switch_uid ?? null,
+      source_index: turnout.source_index ?? null,
+      source_direction: turnout.source_direction ?? null,
+      linked_turnout_id: turnout.linked_turnout_id ?? null,
       station_id: turnout.station_id ?? null,
       position: basePosition,
       track_seg_id: null,
@@ -681,12 +696,38 @@ function hasCompatibleScale(localLayout, backendTotalLength) {
   return diffRatio < 0.2
 }
 
+function yardLayoutScore(yardLayout = null) {
+  if (!yardLayout) return 0
+  return [
+    yardLayout.stations,
+    yardLayout.yard_tracks,
+    yardLayout.yard_sections,
+    yardLayout.yard_signals,
+    yardLayout.yard_switches,
+  ].reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0)
+}
+
+function selectBestYardLayout({ backendYardLayout = null, localYardLayout = null }) {
+  const backendScore = yardLayoutScore(backendYardLayout)
+  const localScore = yardLayoutScore(localYardLayout)
+  if (backendScore <= 0) return localYardLayout ?? null
+  if (localScore <= 0) return backendYardLayout
+  return backendScore >= localScore ? backendYardLayout : localYardLayout
+}
+
 function composeLayout({ localLayout = null, snapshot = null, yardLayout = null }) {
   const backendSections = Array.isArray(snapshot?.sections) ? snapshot.sections : []
   const baseLayout = localLayout ?? {}
+  const resolvedYardLayout = selectBestYardLayout({
+    backendYardLayout: yardLayout,
+    localYardLayout: baseLayout?.yard_layout,
+  })
 
   if (!backendSections.length) {
-    return localLayout
+    return {
+      ...baseLayout,
+      yard_layout: resolvedYardLayout,
+    }
   }
 
   const blocks = backendSections.map(normalizeBlockFromSection)
@@ -694,11 +735,11 @@ function composeLayout({ localLayout = null, snapshot = null, yardLayout = null 
   const localStations = localLayout?.stations ?? []
   const stations = buildStationsFromBackend({
     sections: backendSections,
-    yardLayout,
+    yardLayout: resolvedYardLayout,
     localStations,
     totalLength,
   })
-  const graph = buildSyntheticGraph(blocks, stations, yardLayout, snapshot?.switches ?? [])
+  const graph = buildSyntheticGraph(blocks, stations, resolvedYardLayout, snapshot?.switches ?? [])
   const resolvedStations = graph?.stations ?? stations
   const stationTransformById = new Map(
     resolvedStations.map((station) => [station.station_id, { graph_x: station.graph_x, graph_y: station.graph_y }]),
@@ -706,21 +747,21 @@ function composeLayout({ localLayout = null, snapshot = null, yardLayout = null 
 
   return {
     ...baseLayout,
-    line_id: snapshot?.line_id ?? yardLayout?.line_id ?? baseLayout?.line_id ?? 'LINE-1',
+    line_id: snapshot?.line_id ?? resolvedYardLayout?.line_id ?? baseLayout?.line_id ?? 'LINE-1',
     source: 'backend-derived',
     total_length_m: totalLength,
     stations: resolvedStations,
     blocks,
-    signals: buildSignalsFromBackend({ snapshot, yardLayout, stations: resolvedStations }),
+    signals: buildSignalsFromBackend({ snapshot, yardLayout: resolvedYardLayout, stations: resolvedStations }),
     turnouts: buildTurnoutsFromBackend({
       snapshot,
-      yardLayout,
+      yardLayout: resolvedYardLayout,
       stations: resolvedStations,
       stationTransforms: stationTransformById,
     }),
     graph,
     backend_snapshot_sections: backendSections,
-    yard_layout: yardLayout ?? null,
+    yard_layout: resolvedYardLayout,
   }
 }
 
@@ -765,14 +806,19 @@ export const useLineLayoutStore = defineStore('lineLayout', () => {
   }
 
   async function loadBackendSeeds() {
-    const [snapshotResult, yardResult] = await Promise.allSettled([
+    const [layoutResult, snapshotResult, yardV2Result, yardResult] = await Promise.allSettled([
+      fetchLineLayout({ suppressErrorLog: true }),
       fetchDashboardSnapshot(),
+      fetchStationYardsV2({ suppressErrorLog: true }),
       fetchStationYards({ suppressErrorLog: true }),
     ])
 
     return {
+      layout: layoutResult.status === 'fulfilled' ? layoutResult.value : null,
       snapshot: snapshotResult.status === 'fulfilled' ? snapshotResult.value : null,
-      yardLayout: yardResult.status === 'fulfilled' ? yardResult.value : null,
+      yardLayout: yardV2Result.status === 'fulfilled'
+        ? yardV2Result.value
+        : yardResult.status === 'fulfilled' ? yardResult.value : null,
     }
   }
 
@@ -790,16 +836,18 @@ export const useLineLayoutStore = defineStore('lineLayout', () => {
       const localLayout = localResult.status === 'fulfilled' ? localResult.value : null
       const backendSeeds = backendResult.status === 'fulfilled'
         ? backendResult.value
-        : { snapshot: null, yardLayout: null }
+        : { layout: null, snapshot: null, yardLayout: null }
+      const baseLayout = backendSeeds.layout ?? localLayout
 
       layout.value = composeLayout({
-        localLayout,
+        localLayout: baseLayout,
         snapshot: backendSeeds.snapshot,
         yardLayout: backendSeeds.yardLayout,
       })
 
-      layoutSource.value = layout.value?.source
-        ?? (backendSeeds.snapshot?.sections?.length ? 'backend-derived' : 'local-static')
+      layoutSource.value = backendSeeds.layout
+        ? 'backend-line-layout'
+        : layout.value?.source ?? (backendSeeds.snapshot?.sections?.length ? 'backend-derived' : 'local-static')
 
       if (!layout.value) {
         throw new Error('layout_unavailable')
