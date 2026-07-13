@@ -5816,13 +5816,14 @@
       "track_seg_id": "21",
       "track_id": "SEG-21",
       "start": 2408.5,
-      "end": 2408.5,
-      "length_m": 0.0,
+      "end": 2471.1,
+      "length_m": 62.6,
       "station_id": "ST-03",
       "occupied": false,
       "aspect": "green",
       "condition": "normal",
-      "gradient": 20.0
+      "gradient": 20.0,
+      "stop_position": 2448.6
     },
     {
       "section_id": "9G",
@@ -115863,12 +115864,12 @@
         "track_seg_id": "21",
         "track_id": "SEG-21",
         "start": 2408.5,
-        "end": 2408.5,
-        "length_m": 0.0,
+        "end": 2471.1,
+        "length_m": 62.6,
         "gradient": 20.0,
         "speed_limit": 60.0,
         "station_id": "ST-03",
-        "stop_position": null
+        "stop_position": 2448.6
       },
       {
         "section_id": "9G",

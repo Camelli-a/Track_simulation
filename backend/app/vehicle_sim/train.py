@@ -172,6 +172,34 @@ class Train:
         self._sync_indicator_outputs()
         self._sync_public_state()
 
+    def configure_virtual_ato(self) -> None:
+        """Prepare a non-hardware train for autonomous demo operation."""
+        self.state.direction_code = 1
+        self.key_switch_active = True
+        self.manual_emergency_requested = False
+        self.emergency_pending = False
+        self.parking_brake_applied = False
+        self.parking_release_requested = True
+        self.requested_traction_level = 0
+        self.requested_brake_level = 0
+        self.cached_traction_level = 0
+        self.cached_brake_level = 0
+        self.requested_traction_percent = 0.0
+        self.requested_brake_percent = 0.0
+        self.current_traction_level = 0
+        self.current_brake_level = 0
+        self.current_traction_percent = 0.0
+        self.current_brake_percent = 0.0
+        self.ato_capable = True
+        self.ato_start_requested = True
+        self.hardware_ato_active = True
+        self.driving_mode = "AM"
+        self.control_source = "ato"
+        if not self.state.emergency_brake:
+            self.state.mode = "ato"
+        self._sync_door_state()
+        self._sync_public_state()
+
     def apply_ma_state(self, ma_limit: MaLimit):
         if ma_limit.vehicle_id == self.state.vehicle_id:
             self.ma_limit = ma_limit.ma_limit
@@ -212,12 +240,24 @@ class Train:
         stops: list[float] = []
         seen: set[float] = set()
         for section in getattr(self.track, "sections", []):
+            if not getattr(section, "station_id", None):
+                continue
             key = self._stop_target_key(getattr(section, "stop_position", None))
             if key is None or key in seen:
                 continue
             seen.add(key)
             stops.append(float(getattr(section, "stop_position")))
         return stops
+
+    def _station_stop_position_at(self, position_m: float) -> float | None:
+        if hasattr(self.track, "get_section"):
+            section = self.track.get_section(float(position_m))
+            if not getattr(section, "station_id", None):
+                return None
+            return getattr(section, "stop_position", None)
+        if hasattr(self.track, "get_stop_position"):
+            return self.track.get_stop_position(float(position_m))
+        return None
 
     def _find_next_track_stop_m(self, position_m: float | None = None) -> float | None:
         position = self.state.position if position_m is None else float(position_m)
@@ -1004,11 +1044,10 @@ class Train:
             and self._is_completed_stop_target(self.next_stop_target_m)
         ):
             self.next_stop_target_m = None
-        if hasattr(self.track, "get_stop_position"):
-            stop_position = self.track.get_stop_position(self.state.position)
+        stop_position = self._station_stop_position_at(self.state.position)
+        if stop_position is not None:
             if (
                 not self._is_completed_stop_target(stop_position)
-                and stop_position is not None
                 and abs(float(stop_position) - self.state.position)
                 <= self.door_stop_tolerance_m
             ):
@@ -1017,10 +1056,9 @@ class Train:
         if next_track_stop is not None:
             self.next_stop_target_m = next_track_stop
             return next_track_stop
-        if hasattr(self.track, "get_stop_position"):
-            stop_position = self.track.get_stop_position(self.state.position)
-            if not self._is_completed_stop_target(stop_position):
-                return stop_position
+        stop_position = self._station_stop_position_at(self.state.position)
+        if stop_position is not None and not self._is_completed_stop_target(stop_position):
+            return stop_position
         return None
 
     def _maybe_generate_stop_result(self) -> None:
