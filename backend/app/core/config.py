@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     SIGNAL_MMI_HOST: str = "192.168.100.121"
     SIGNAL_MMI_PORT: int = 9999
 
+    # 视景系统 UDP 目标地址（视景控制机）.
+    SCENERY_HOST: str = "192.168.100.124"
+    SCENERY_PORT: int = 8303
+    SCENERY_LOCAL_PORT: int = 8302
+
     # ZMQ broker addresses.
     ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
     ZMQ_BROKER_BACKEND: str = "tcp://127.0.0.1:5556"
