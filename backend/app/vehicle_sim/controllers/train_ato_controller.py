@@ -756,7 +756,7 @@ class TrainAtoController:
             and target_speed_kmh > 1.0
             and underspeed_kmh > 0.5
         ):
-            return 1, 0
+            return self.STATIC_CREEP_TRACTION_LEVEL, 0
         if underspeed_kmh > 3.0 and target_speed_kmh > 1.0:
             if underspeed_kmh > 25.0:
                 traction_level = 4
