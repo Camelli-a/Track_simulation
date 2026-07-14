@@ -27,6 +27,11 @@ def main():
     parser.add_argument("--train-index", type=int, default=None)
     parser.add_argument("--initial-position", type=float, default=0.0)
     parser.add_argument("--line-layout", default=None)
+    parser.add_argument(
+        "--virtual-ato",
+        action="store_true",
+        help="Configure this non-TRAIN-001 process as a virtual ATO train.",
+    )
     args = parser.parse_args()
 
     vehicle_id = args.vehicle_id
@@ -40,6 +45,7 @@ def main():
         vehicle_id=vehicle_id,
         slot=train_index,
         position=args.initial_position,
+        virtual_ato=args.virtual_ato,
     )
     if not result.get("ok"):
         raise SystemExit(f"failed to create single train process: {result}")
@@ -57,6 +63,7 @@ def main():
     print(f"vehicle_id={vehicle_id}")
     print(f"train_index={train_index}")
     print(f"initial_position={args.initial_position}")
+    print(f"virtual_ato={args.virtual_ato and vehicle_id != 'TRAIN-001'}")
     print(f"line_layout={args.line_layout or 'default'}")
 
     try:

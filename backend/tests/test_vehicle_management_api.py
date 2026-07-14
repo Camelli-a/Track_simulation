@@ -56,7 +56,8 @@ def test_vehicle_manage_add_remove_clear_reset(monkeypatch):
     assert data["ok"] is True
     assert data["result"]["vehicle_id"] == "TRAIN-011"
     assert data["result"]["train_index"] == 11
-    assert data["result"]["control_policy"] == "non_001_added_to_onboard_ato_queue"
+    assert data["result"]["virtual_ato"] is False
+    assert "control_policy" not in data["result"]
     assert len(data["trains"]) == 11
     assert published[-1] == (
         "add_train",
@@ -64,7 +65,7 @@ def test_vehicle_manage_add_remove_clear_reset(monkeypatch):
             "vehicle_id": "TRAIN-011",
             "train_index": 11,
             "line_id": "LINE-1",
-            "position": 313.0,
+            "position": 1200.0,
         },
     )
 
@@ -134,6 +135,43 @@ def test_vehicle_manage_train_001_remains_manual_management(monkeypatch):
             "position": 1200.0,
         },
     )
+
+
+def test_vehicle_manage_add_train_virtual_ato_is_explicit(monkeypatch):
+    published = []
+    started = []
+
+    monkeypatch.setattr(
+        vehicle_endpoint,
+        "publish_module_message",
+        lambda topic, data: published.append((topic, data)) or True,
+    )
+    monkeypatch.setattr(
+        vehicle_endpoint.vehicle_process_manager,
+        "start_train",
+        lambda **kwargs: started.append(kwargs) or {"enabled": True, "started": True, **kwargs},
+    )
+    vehicle_endpoint.vehicle_manager.clear_trains()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/vehicle/manage",
+        json={
+            "type": "add_train",
+            "vehicle_id": "TRAIN-002",
+            "train_index": 2,
+            "position": 0.0,
+            "virtual_ato": True,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["result"]["virtual_ato"] is True
+    assert "control_policy" not in data["result"]
+    assert published[-1][1]["virtual_ato"] is True
+    assert started[-1]["virtual_ato"] is True
 
 
 def test_vehicle_trains_endpoint_reports_default_count():

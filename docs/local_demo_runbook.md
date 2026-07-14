@@ -272,6 +272,7 @@ PLC_HOST=192.168.100.123
 PLC_PORT=8001
 VISUAL_TRACK=0
 VISUAL_DIRECTION_NAME=down
+SCENERY_SECTION_DIRECTION=-1
 SIGNAL_COORD_OFFSET_M=216.46
 VIEWER_ABS_OFFSET_M=4028.28
 ```
@@ -585,6 +586,7 @@ $r.trains | Where-Object {$_.vehicle_id -like "TRAIN-*"} | Select-Object vehicle
 
 - `auto_departure_launcher` 不启动 `TRAIN-001`。
 - `TRAIN-001` 由终端 4 单独手动启动，上线后仍然需要真实司机台状态和 ATO 按钮才会移动。
+- 前端普通“添加车辆”只创建/启动车辆进程，不会自动进入 virtual ATO；需要自动错峰时使用本节 launcher 命令。
 - launcher 只监控 `TRAIN-001.position_m`。
 - 当 `TRAIN-001.position_m >= clear-distance`，例如 `200m`，launcher 才启动 `TRAIN-002`。
 - `TRAIN-002` 是 virtual ATO，不需要真实司机台。

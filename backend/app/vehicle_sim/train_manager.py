@@ -35,6 +35,7 @@ class TrainManager:
         slot: int | None = None,
         position: float = 0.0,
         line_id: str = "LINE-1",
+        virtual_ato: bool = False,
     ) -> dict:
         if slot is None:
             slot = self._slot_for_vehicle_id_or_first_free(vehicle_id)
@@ -56,7 +57,8 @@ class TrainManager:
         train.state.position = float(position)
         train.state.is_running = train.state.speed_ms > 0.0
         train.set_next_stop_target_m(train._find_next_track_stop_m(train.state.position))
-        if vehicle_id != "TRAIN-001":
+        virtual_ato = bool(virtual_ato) and vehicle_id != "TRAIN-001"
+        if virtual_ato:
             train.configure_virtual_ato()
         self.trains[vehicle_id] = train
         self.slot_to_vehicle_id[slot] = vehicle_id
@@ -67,6 +69,7 @@ class TrainManager:
             "train_index": slot,
             "position": train.state.position,
             "line_id": line_id,
+            "virtual_ato": virtual_ato,
         }
 
     def remove_train(

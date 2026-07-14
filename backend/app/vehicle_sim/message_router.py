@@ -426,6 +426,7 @@ class MessageRouter:
                 ),
                 position=float(msg.get("position", 0.0)),
                 line_id=msg.get("line_id", "LINE-1"),
+                virtual_ato=bool(msg.get("virtual_ato", False)),
             )
             if not result.get("ok"):
                 return result
@@ -556,6 +557,7 @@ class MessageRouter:
             ),
             position=float(msg.get("position", 0.0)),
             line_id=msg.get("line_id", "LINE-1"),
+            virtual_ato=bool(msg.get("virtual_ato", False)),
         )
 
     def _handle_remove_train(self, msg: dict):
@@ -596,4 +598,5 @@ class MessageRouter:
             slot=slot,
             position=0.0,
             line_id=line_id,
+            virtual_ato=False,
         )

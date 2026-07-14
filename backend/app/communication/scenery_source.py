@@ -369,7 +369,7 @@ class ScenerySource:
             speed_mmps=int(round(float(visual.get("speed_mps", 0.0)) * 1000.0)),
             section_distance_mm=int(round(float(edge_offset_m) * 1000.0)),
             edge_id=int(edge_id),
-            direction=int(visual.get("direction", 1) or 1),
+            direction=int(getattr(settings, "SCENERY_SECTION_DIRECTION", visual.get("direction", 1)) or 1),
         )
         return True
 

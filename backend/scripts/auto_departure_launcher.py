@@ -108,6 +108,7 @@ def build_vehicle_command(
         str(float(initial_position)),
         "--dt",
         str(float(dt)),
+        "--virtual-ato",
     ]
 
 

@@ -377,6 +377,7 @@ class LineOperationService:
                 vehicle_id=vehicle_id,
                 train_index=train_index,
                 position=start_position,
+                virtual_ato=True,
             )
         )
         if not getattr(response, "ok", False):

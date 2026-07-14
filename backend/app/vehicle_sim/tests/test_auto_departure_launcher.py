@@ -133,6 +133,7 @@ def test_launcher_vehicle_command_uses_single_train_process_entrypoint():
         "0.0",
         "--dt",
         "0.1",
+        "--virtual-ato",
     ]
 
 
@@ -158,7 +159,7 @@ def test_train001_remains_hardware_controlled_sm_on_creation():
 
 def test_virtual_train002_starts_at_origin_with_next_stop_431_and_am_ready():
     manager = TrainManager(initial_count=0)
-    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0)
+    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0, virtual_ato=True)
     train = manager.get_train("TRAIN-002")
 
     assert train.state.position == pytest.approx(0.0)
@@ -177,7 +178,7 @@ def test_virtual_train002_starts_at_origin_with_next_stop_431_and_am_ready():
 
 def test_virtual_train002_precheck_can_start_with_valid_ma_and_comm():
     manager = TrainManager(initial_count=0)
-    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0)
+    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0, virtual_ato=True)
     train = manager.get_train("TRAIN-002")
     train.apply_ma_state(
         MaLimit(
@@ -209,7 +210,7 @@ def test_virtual_train002_precheck_can_start_with_valid_ma_and_comm():
 
 def test_virtual_train002_moves_under_valid_ma():
     manager = TrainManager(initial_count=0)
-    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0)
+    manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0, virtual_ato=True)
     train = manager.get_train("TRAIN-002")
     train.apply_ma_state(
         MaLimit(
@@ -243,3 +244,16 @@ def test_virtual_train_protocol_keeps_visual_edge_range():
 
     assert protocol["edge_id"] is not None
     assert 1 <= protocol["edge_id"] <= 48
+
+
+def test_manual_add_train002_does_not_auto_enter_ato():
+    manager = TrainManager(initial_count=0)
+    result = manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0)
+    train = manager.get_train("TRAIN-002")
+
+    assert result["ok"] is True
+    assert result["virtual_ato"] is False
+    assert train.driving_mode == "SM"
+    assert train.control_source == "manual"
+    assert train.state.mode == "manual"
+    assert train.ato_capable is False

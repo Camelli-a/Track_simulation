@@ -27,3 +27,4 @@ def test_scenery_source_position_zero_uses_first_visual_edge():
     assert updated is True
     assert state["edge_id"] == 3
     assert state["section_dist"] == 0
+    assert state["direction"] == -1

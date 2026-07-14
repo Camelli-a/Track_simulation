@@ -54,6 +54,8 @@ class VehicleManagementRequest(BaseModel):
     line_id: str = Field(default="LINE-1")
     position: float = Field(default=0.0, ge=0)
     count: Optional[int] = Field(default=None, ge=0)
+    virtual_ato: bool = False
+    enqueue_ato: bool = False
 
 
 class VehicleManagementResponse(BaseModel):

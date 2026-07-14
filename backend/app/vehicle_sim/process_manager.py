@@ -51,6 +51,7 @@ class VehicleProcessManager:
         train_index: int,
         initial_position: float = 0.0,
         line_layout: str | None = None,
+        virtual_ato: bool = False,
     ) -> dict[str, Any]:
         if not self.enabled:
             return {"enabled": False, "started": False, "reason": "vehicle_process_manager_disabled"}
@@ -91,6 +92,8 @@ class VehicleProcessManager:
                 "--line-layout",
                 str(layout_path),
             ]
+            if bool(virtual_ato) and vehicle_id != "TRAIN-001":
+                command.append("--virtual-ato")
 
             env = os.environ.copy()
             env.setdefault("PYTHONUNBUFFERED", "1")
@@ -134,6 +137,7 @@ class VehicleProcessManager:
                 "pid": process.pid,
                 "log_path": str(log_path),
                 "command": command,
+                "virtual_ato": bool(virtual_ato) and vehicle_id != "TRAIN-001",
             }
 
     def stop_train(self, vehicle_id: str, *, timeout: float = 3.0) -> dict[str, Any]:

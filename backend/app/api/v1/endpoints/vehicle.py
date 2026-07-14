@@ -484,7 +484,7 @@ def get_trip_status(vehicle_id: str) -> TripStatusResponse:
 
 @router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
 async def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
-    if command.type == "add_train" and not _is_physical_driver_train(command):
+    if command.type == "add_train" and command.enqueue_ato and not _is_physical_driver_train(command):
         return await _enqueue_ato_train(command)
     if command.type == "remove_train" and command.vehicle_id:
         line_operation_service.forget_train(command.vehicle_id)
@@ -696,6 +696,8 @@ def _build_vehicle_management_message(command: VehicleManagementRequest) -> dict
             "line_id": command.line_id,
             "position": command.position,
         }
+        if command.virtual_ato:
+            message["virtual_ato"] = True
         if command.vehicle_id is not None:
             message["vehicle_id"] = command.vehicle_id
         if command.train_index is not None:
@@ -732,6 +734,7 @@ def _sync_vehicle_processes(command: VehicleManagementRequest, result: dict) -> 
             vehicle_id=str(vehicle_id),
             train_index=int(train_index),
             initial_position=float(result.get("position", command.position)),
+            virtual_ato=bool(command.virtual_ato),
         )
 
     if command.type == "remove_train":
@@ -752,6 +755,7 @@ def _sync_vehicle_processes(command: VehicleManagementRequest, result: dict) -> 
                     vehicle_id=str(train["vehicle_id"]),
                     train_index=int(train["train_index"]),
                     initial_position=float(train.get("position", 0.0)),
+                    virtual_ato=False,
                 )
             )
         return {"reset": True, "stop": stop_result, "start": start_results}

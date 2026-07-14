@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     SCENERY_HOST: str = "192.168.100.124"
     SCENERY_PORT: int = 8303
     SCENERY_LOCAL_PORT: int = 8302
+    # Direction code used only in the 3D viewer UDP SectionDirection field.
+    # The internal train direction_code remains 1 for down-line, increasing
+    # position_m. Some viewer edge models face the opposite way, so the UDP
+    # visual direction is configurable without changing ATO/signalling logic.
+    SCENERY_SECTION_DIRECTION: int = -1
 
     # ZMQ broker addresses.
     ZMQ_BROKER_FRONTEND: str = "tcp://127.0.0.1:5555"
