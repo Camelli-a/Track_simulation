@@ -18,6 +18,26 @@ from .track_map import TrackMap
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LINE_LAYOUT_PATH = PROJECT_ROOT / "frontend" / "public" / "data" / "line-layout.json"
 
+# TRAIN-001 demo runs down-track, and TrainState.position_m is the front cab.
+# The old stop targets came from platform StopLeftKm (the near edge), which
+# stopped the cab at the platform entrance.  These values are Track=0
+# StopRightKm from "视景系统公里标最新数据+站台位置20260703.xlsx" sheet "站台位置".
+DOWN_PLATFORM_FRONT_CAB_STOPS_M = {
+    "ST-01": 431.0,
+    "ST-02": 1778.52,
+    "ST-03": 2566.61,
+    "ST-04": 3547.32,
+    "ST-05": 5133.834,
+    "ST-06": 6459.274,
+    "ST-07": 8238.204,
+    "ST-08": 9547.344,
+    "ST-09": 10718.11378,
+    "ST-10": 12117.07,
+    "ST-11": 14029.28014,
+    "ST-12": 15072.91,
+    "ST-13": 16169.01966,
+}
+
 
 def default_line_layout_path() -> Path:
     return DEFAULT_LINE_LAYOUT_PATH
@@ -48,11 +68,7 @@ def build_track_sections(layout: dict[str, Any]) -> list[TrackSection]:
         speed_limit = _effective_speed_limit_kmh(section, speed_limits, start, end)
         edge_id = _int_or_none(section.get("edge_id") or section.get("track_seg_id")) or index
         station_id = section.get("station_id")
-        stop_position = (
-            _valid_stop_position(section.get("stop_position"), start, end)
-            if station_id
-            else None
-        )
+        stop_position = _section_stop_position(section, station_id, start, end)
 
         result.append(
             TrackSection(
@@ -112,6 +128,23 @@ def _layout_sections(layout: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(blocks, list) and blocks:
         return blocks
     raise ValueError("line layout must contain track_info.sections or blocks")
+
+
+def _section_stop_position(
+    section: dict[str, Any],
+    station_id: str | None,
+    section_start_m: float,
+    section_end_m: float,
+) -> float | None:
+    if not station_id:
+        return None
+    if station_id in DOWN_PLATFORM_FRONT_CAB_STOPS_M:
+        return _valid_stop_position(
+            DOWN_PLATFORM_FRONT_CAB_STOPS_M[station_id],
+            section_start_m,
+            section_end_m,
+        )
+    return _valid_stop_position(section.get("stop_position"), section_start_m, section_end_m)
 
 
 def _effective_speed_limit_kmh(

@@ -74,7 +74,7 @@ def test_enable_fallback_ato_is_disabled_by_default():
         "reason": "legacy_fallback_ato_disabled",
     }
     assert train.fallback_ato is None
-    assert train.next_stop_target_m == 1660.5
+    assert train.next_stop_target_m == 1778.52
 
 
 def test_enable_fallback_ato_updates_owned_stop_target():
