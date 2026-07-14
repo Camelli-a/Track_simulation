@@ -7,19 +7,19 @@ from app.vehicle_sim.train import Train
 
 
 EXPECTED_STOP_SEQUENCE = [
-    313.0,
-    1660.5,
-    2448.6,
-    3429.3,
-    5014.5,
-    6339.9,
-    8118.8,
-    9429.2,
-    10598.7,
-    11997.0,
-    13906.8,
-    14954.0,
-    16048.9,
+    431.0,
+    1778.52,
+    2566.61,
+    3547.32,
+    5133.834,
+    6459.274,
+    8238.204,
+    9547.344,
+    10718.11378,
+    12117.07,
+    14029.28014,
+    15072.91,
+    16169.01966,
 ]
 
 
@@ -44,8 +44,8 @@ def test_line_layout_loader_exposes_st03_stop_position():
     ]
 
     assert st03_sections
-    assert st03_sections[0].stop_position == pytest.approx(2448.6)
-    assert st03_sections[0].start <= 2448.6 <= st03_sections[0].end
+    assert st03_sections[0].stop_position == pytest.approx(2566.61)
+    assert st03_sections[0].start <= 2566.61 <= st03_sections[0].end
 
 
 def test_ato_usable_stop_sequence_contains_expected_stops_only():
@@ -74,17 +74,17 @@ def test_station_none_stop_position_is_not_selected():
 def test_next_station_from_start_is_st01():
     train = _train_at(0.0)
 
-    assert train._resolve_stop_target_m() == pytest.approx(313.0)
+    assert train._resolve_stop_target_m() == pytest.approx(431.0)
 
 
 def test_next_station_after_st02_is_st03():
     train = _train_at(2000.0)
 
-    assert train._resolve_stop_target_m() == pytest.approx(2448.6)
+    assert train._resolve_stop_target_m() == pytest.approx(2566.61)
 
 
 def test_spurious_11424_stop_is_not_selected_after_5751():
     train = _train_at(5751.1)
 
-    assert train._resolve_stop_target_m() == pytest.approx(6339.9)
-    assert train.next_stop_target_m == pytest.approx(6339.9)
+    assert train._resolve_stop_target_m() == pytest.approx(6459.274)
+    assert train.next_stop_target_m == pytest.approx(6459.274)

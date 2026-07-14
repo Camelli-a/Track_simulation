@@ -156,7 +156,7 @@ def test_train001_remains_hardware_controlled_sm_on_creation():
     assert train.ato_capable is False
 
 
-def test_virtual_train002_starts_at_origin_with_next_stop_313_and_am_ready():
+def test_virtual_train002_starts_at_origin_with_next_stop_431_and_am_ready():
     manager = TrainManager(initial_count=0)
     manager.add_train(vehicle_id="TRAIN-002", slot=2, position=0.0)
     train = manager.get_train("TRAIN-002")
@@ -164,8 +164,8 @@ def test_virtual_train002_starts_at_origin_with_next_stop_313_and_am_ready():
     assert train.state.position == pytest.approx(0.0)
     assert train.state.line_id == "LINE-1"
     assert train.state.direction_code == 1
-    assert train.next_stop_target_m == pytest.approx(313.0)
-    assert train._resolve_stop_target_m() == pytest.approx(313.0)
+    assert train.next_stop_target_m == pytest.approx(431.0)
+    assert train._resolve_stop_target_m() == pytest.approx(431.0)
     assert train.driving_mode == "AM"
     assert train.control_source == "ato"
     assert train.state.mode == "ato"
@@ -233,7 +233,7 @@ def test_virtual_train002_moves_under_valid_ma():
     assert train.ato_state == "approaching"
     assert train.commanded_traction_level > 0
     assert train.commanded_brake_level == 0
-    assert train.stop_target_m == pytest.approx(313.0)
+    assert train.stop_target_m == pytest.approx(431.0)
 
 
 def test_virtual_train_protocol_keeps_visual_edge_range():
