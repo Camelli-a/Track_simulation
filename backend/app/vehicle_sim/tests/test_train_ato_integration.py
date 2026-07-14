@@ -409,24 +409,33 @@ def test_am_relaunch_after_station_stop_on_uphill_grade():
     assert train.state.position > 313.324
 
 
-def test_stop_result_is_not_generated_before_stop_window_overshoot():
+def test_stop_result_is_generated_for_stopped_overshoot_inside_station_acceptance_window():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
-    train.state.position = 1501.0
+    train.state.position = 1502.3
     train.state.speed_ms = 0.0
     train.next_stop_target_m = 1500.0
+    train.driving_mode = "AM"
+    train.control_source = "ato"
+    train.state.mode = "ato"
     _apply_valid_ma(train, ma_limit=1600.0, allowed_speed=20.0, distance=100.0)
 
     train.step_tick(0.1)
 
-    assert train.state.stop_result is None
-    assert train.stop_result_published_for_target is False
+    result = train.state.stop_result
+    assert result is not None
+    assert result["status"] == "overshoot"
+    assert result["qualified"] is False
+    assert result["error_m"] == pytest.approx(2.3)
+    assert train.stop_result_published_for_target is True
+    assert train.last_brake_bias_adjustment is not None
+    assert train.last_brake_bias_adjustment["delta"] > 0
 
 
-def test_stop_result_is_not_generated_before_stop_window_undershoot():
+def test_stop_result_is_not_generated_outside_station_acceptance_window():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
-    train.state.position = 1499.0
+    train.state.position = 1503.5
     train.state.speed_ms = 0.0
     train.next_stop_target_m = 1500.0
     _apply_valid_ma(train, ma_limit=1600.0, allowed_speed=20.0, distance=100.0)

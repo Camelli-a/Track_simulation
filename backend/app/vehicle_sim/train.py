@@ -168,7 +168,7 @@ class Train:
         self.door_dwell_sec = 5.0
         self.door_stop_speed_ms = 0.05
         self.door_stop_tolerance_m = self.train_ato_controller.HOLD_DISTANCE_M
-        self.station_stop_acceptance_tolerance_m = 2.0
+        self.station_stop_acceptance_tolerance_m = 3.0
         self.door_rearm_distance_m = 2.0
         self.fallback_ato = None
         self.next_stop_target_m = None
@@ -1274,10 +1274,18 @@ class Train:
             self.last_ato_output is not None
             and self.last_ato_output.ato_state == "holding"
         )
+        station_acceptance_tolerance_m = max(
+            self.train_ato_controller.HOLD_DISTANCE_M,
+            getattr(
+                self,
+                "station_stop_acceptance_tolerance_m",
+                self.train_ato_controller.HOLD_DISTANCE_M,
+            ),
+        )
         if (
             self.state.speed_ms <= self.train_ato_controller.HOLD_SPEED_MS
             and (
-                distance_to_stop_m <= self.train_ato_controller.HOLD_DISTANCE_M
+                distance_to_stop_m <= station_acceptance_tolerance_m
                 or holding_state
             )
         ):
