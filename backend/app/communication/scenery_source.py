@@ -154,6 +154,35 @@ FRAME_MIN_LEN = (
 assert FRAME_MIN_LEN == 128, f"FRAME_MIN_LEN={FRAME_MIN_LEN}"
 
 
+def _initial_visual_train_position() -> tuple[int, int]:
+    """Return the viewer EdgeID/offset for internal position_m=0.
+
+    The UDP sender may emit frames before the first train_state arrives. EdgeID
+    0 is invalid for the 3D viewer, so seed the frame with the first configured
+    down-direction visual edge. This is display-only and does not change the
+    vehicle/ATO position.
+    """
+    try:
+        from app.data_flow.visual_mapping import build_visual_payload
+
+        visual = build_visual_payload(
+            {
+                "vehicle_id": "TRAIN-001",
+                "line_id": "LINE-1",
+                "position_m": 0.0,
+                "speed_mps": 0.0,
+                "direction": 1,
+            }
+        )
+        edge_id = visual.get("edge_id")
+        edge_offset_m = visual.get("edge_offset_m")
+        if edge_id is not None and edge_offset_m is not None:
+            return int(edge_id), int(round(float(edge_offset_m) * 1000.0))
+    except Exception as exc:
+        logger.warning("Failed to seed initial visual edge from mapping: %s", exc)
+    return 3, 0
+
+
 class ScenerySource:
     """
     视景系统 UDP 发送器
@@ -192,12 +221,13 @@ class ScenerySource:
         self._switch_states   = bytearray([SW_NORMAL] * SWITCH_COUNT)  # index 0..28
 
         # 本车状态
+        initial_edge_id, initial_section_dist_mm = _initial_visual_train_position()
         self._speed_mmps      = 0          # 毫米/秒
         self._dwell_time      = 0          # 发车时间（秒）
         self._run_state       = RUN_COASTING  # 默认惰行
         self._accel           = 50         # 0~64(百分比)，50=约50%
-        self._section_dist    = 0          # 车头位置，mm
-        self._edge_id         = 0          # 边号/区段号
+        self._section_dist    = initial_section_dist_mm  # 车头位置，mm
+        self._edge_id         = initial_edge_id          # 边号/区段号
         self._direction       = 1          # +1=正方向
 
         # 他车列表（最多 TRAIN_MAX 辆）
