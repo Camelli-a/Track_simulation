@@ -116,7 +116,16 @@ def find_static_speed_limit_with_preview(
     candidates.extend(preview_candidates)
     if not candidates:
         return None
-    return min(candidates, key=lambda item: item["speed_limit"])
+    selected = min(candidates, key=lambda item: item["speed_limit"])
+    if (
+        selected.get("preview")
+        and base_limit is not None
+        and float(selected["speed_limit"]) >= float(base_limit) - 0.05
+    ):
+        if current is not None:
+            return current
+        return None
+    return selected
 
 
 def resolve_speed_limit(

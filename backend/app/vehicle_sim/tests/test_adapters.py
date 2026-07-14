@@ -321,6 +321,7 @@ def test_driver_input_maps_driving_mode_and_direction():
             "control_mode": "manual",
             "ato_active": False,
             "direction": "neutral",
+            "mode_dn_confirm": True,
         }
     )
     assert train.driving_mode == "SM"

@@ -131,6 +131,8 @@ class Train:
         self.manual_emergency_requested = False
         self.key_switch_active = True
         self.ato_start_requested = False
+        self.ato_start_accepted = False
+        self.ato_start_reject_reason = None
         self.ato_capable = False
         self.hardware_ato_active = False
         self.auto_reverse_capable = False
@@ -197,6 +199,8 @@ class Train:
         self.current_brake_percent = 0.0
         self.ato_capable = True
         self.ato_start_requested = True
+        self.ato_start_accepted = True
+        self.ato_start_reject_reason = None
         self.hardware_ato_active = True
         self.driving_mode = "AM"
         self.control_source = "ato"
@@ -315,6 +319,36 @@ class Train:
 
     def has_valid_ma(self, now: float | None = None) -> bool:
         return self.validate_ma(now).valid
+
+    def _can_accept_ato_start(self) -> bool:
+        """Check whether a driver desk ATO start button press may enter AM."""
+        reasons: list[str] = []
+        ma = self.validate_ma()
+
+        if not self.key_switch_active:
+            reasons.append("key_switch_off")
+        if int(self.state.direction_code) == 0:
+            reasons.append("direction_neutral")
+        if (
+            self.manual_emergency_requested
+            or self.external_emergency_fault
+            or self.state.emergency_brake
+        ):
+            reasons.append("emergency_active")
+        if self.parking_brake_applied:
+            reasons.append("parking_brake_applied")
+        if not self.door_state.all_closed:
+            reasons.append("doors_not_closed")
+        if not self.comm_ok:
+            reasons.append("communication_lost")
+        if not ma.valid:
+            reasons.append(f"ma_invalid:{ma.reason or 'unknown'}")
+        elif not ma.traction_permitted:
+            reasons.append("ma_no_traction_authority")
+
+        self.ato_start_accepted = not reasons
+        self.ato_start_reject_reason = ";".join(reasons) if reasons else None
+        return self.ato_start_accepted
 
     def get_distance_to_ma_m(self, now: float | None = None) -> float | None:
         result = self.validate_ma(now)
@@ -442,11 +476,7 @@ class Train:
             self.current_brake_level = brake_level
             self.current_traction_percent = traction_percent
             self.current_brake_percent = brake_percent
-        if (driver_input.control_mode or "").lower() == "ato":
-            self.driving_mode = "AM"
-        else:
-            self.driving_mode = "SM"
-        self.control_source = "manual"
+        requested_control_mode = (driver_input.control_mode or "").lower()
         if driver_input.direction_code is not None:
             self.state.direction_code = -1 if driver_input.direction_code == 2 else 1
         elif driver_input.direction in {"reverse", "backward"}:
@@ -535,6 +565,29 @@ class Train:
             self.hardware_door_closed_light = bool(driver_input.door_closed_light)
         if driver_input.high_voltage_light is not None:
             self.hardware_high_voltage_light = bool(driver_input.high_voltage_light)
+
+        if self.mode_down_confirmed:
+            self.driving_mode = "SM"
+            self.control_source = "manual"
+            self.ato_start_accepted = False
+            self.ato_start_reject_reason = "mode_down_confirmed"
+        elif requested_control_mode == "ato":
+            self.driving_mode = "AM"
+            self.control_source = "ato"
+            self.ato_start_accepted = True
+            self.ato_start_reject_reason = None
+            if not self.state.emergency_brake:
+                self.state.mode = "ato"
+        elif self.ato_start_requested and self._can_accept_ato_start():
+            self.driving_mode = "AM"
+            self.control_source = "ato"
+            self.cached_external_ato_command = None
+            self.fallback_ato = None
+            if not self.state.emergency_brake:
+                self.state.mode = "ato"
+        elif self.driving_mode != "AM":
+            self.driving_mode = "SM"
+            self.control_source = "manual"
 
     def step_ato(self, ato_command: AtoCommand, dt: float):
         """Cache a legacy/external ATO request without integrating dynamics."""
@@ -873,6 +926,9 @@ class Train:
             self.driving_mode == "AM" and self.state.mode == "ato"
         )
         self.state.ato_capable = self.ato_capable
+        self.state.ato_start_requested = self.ato_start_requested
+        self.state.ato_start_accepted = self.ato_start_accepted
+        self.state.ato_start_reject_reason = self.ato_start_reject_reason
         self.state.auto_reverse_cap = self.auto_reverse_capable
         self.state.auto_reverse_active = self.auto_reverse_active
         self.state.recommended_speed_kmh = getattr(self, "recommended_speed_kmh", None)
@@ -880,9 +936,11 @@ class Train:
         self.state.parking_brake = self.parking_brake_applied
         self.state.external_speed_limit_kmh = self.external_speed_limit_kmh
         self.state.active_faults = tuple(sorted(self.active_faults))
+        self._sync_atp_debug_to_train_state()
 
     def build_atp_state(self) -> dict:
         decision = self.last_atp_decision
+        debug = self._build_atp_debug()
         return {
             "type": "atp_state",
             "timestamp": time.time(),
@@ -899,7 +957,129 @@ class Train:
             "eb_trigger_speed_kmh": (
                 None if decision is None else decision.eb_trigger_speed_kmh
             ),
+            "speed_limit_source": debug["speed_limit_source"],
+            "track_speed_limit_kmh": debug["track_speed_limit_kmh"],
+            "ma_allowed_speed_kmh": debug["ma_allowed_speed_kmh"],
+            "external_speed_limit_kmh": debug["external_speed_limit_kmh"],
+            "ma_speed_limit_reason": debug["ma_speed_limit_reason"],
+            "permission": debug["permission"],
+            "signal_state": debug["signal_state"],
+            "ma_limit_m": debug["ma_limit_m"],
+            "distance_to_authority_m": debug["distance_to_authority_m"],
+            "service_stop_distance_m": debug["service_stop_distance_m"],
+            "emergency_stop_distance_m": debug["emergency_stop_distance_m"],
         }
+
+    def _sync_atp_debug_to_train_state(self) -> None:
+        debug = self._build_atp_debug()
+        self.state.atp_supervision_state = debug["supervision_state"]
+        self.state.atp_reason = debug["reason"]
+        self.state.atp_allowed_speed_kmh = debug["allowed_speed_kmh"]
+        self.state.atp_speed_limit_source = debug["speed_limit_source"]
+        self.state.atp_track_speed_limit_kmh = debug["track_speed_limit_kmh"]
+        self.state.atp_ma_allowed_speed_kmh = debug["ma_allowed_speed_kmh"]
+        self.state.atp_external_speed_limit_kmh = debug["external_speed_limit_kmh"]
+        self.state.atp_eb_trigger_speed_kmh = debug["eb_trigger_speed_kmh"]
+        self.state.atp_distance_to_authority_m = debug["distance_to_authority_m"]
+        self.state.atp_service_stop_distance_m = debug["service_stop_distance_m"]
+        self.state.atp_emergency_stop_distance_m = debug["emergency_stop_distance_m"]
+        self.state.atp_debug = debug
+
+    def _build_atp_debug(self) -> dict:
+        decision = self.last_atp_decision
+        track_speed_limit = self.track.get_speed_limit(self.state.position)
+        ma_allowed_speed = self.allowed_speed_kmh
+        external_speed_limit = self.external_speed_limit_kmh
+        forced_stop = self.signal_state == "red" or self.permission in {
+            "stop",
+            "deny",
+            "blocked",
+        }
+        speed_limit_source = self._atp_speed_limit_source(
+            track_speed_limit=track_speed_limit,
+            ma_allowed_speed=ma_allowed_speed,
+            external_speed_limit=external_speed_limit,
+            forced_stop=forced_stop,
+            decision_allowed_speed=(
+                None if decision is None else decision.allowed_speed_kmh
+            ),
+        )
+        allowed_speed = (
+            None if decision is None else float(decision.allowed_speed_kmh)
+        )
+        eb_trigger_speed = (
+            self.eb_trigger_speed_kmh
+            if decision is None
+            else float(decision.eb_trigger_speed_kmh)
+        )
+        distance_to_authority = (
+            self.get_distance_to_ma_m()
+            if decision is None
+            else decision.distance_to_authority_m
+        )
+        return {
+            "supervision_state": (
+                "unknown" if decision is None else decision.supervision_state
+            ),
+            "reason": "not_evaluated" if decision is None else decision.reason,
+            "intervened": bool(self.atp_intervened),
+            "emergency_brake": bool(self.state.emergency_brake),
+            "allowed_speed_kmh": self._round_optional(allowed_speed),
+            "speed_limit_source": speed_limit_source,
+            "track_speed_limit_kmh": self._round_optional(track_speed_limit),
+            "ma_allowed_speed_kmh": self._round_optional(ma_allowed_speed),
+            "external_speed_limit_kmh": self._round_optional(external_speed_limit),
+            "ma_speed_limit_reason": self.ma_speed_limit_reason,
+            "speed_limit_warning": bool(self.speed_limit_warning),
+            "upcoming_speed_limit_kmh": self._round_optional(
+                self.upcoming_speed_limit_kmh
+            ),
+            "speed_limit_warning_distance_m": self._round_optional(
+                self.speed_limit_warning_distance_m
+            ),
+            "permission": self.permission,
+            "signal_state": self.signal_state,
+            "ma_limit_m": self._round_optional(self.ma_limit),
+            "target_distance_m": self._round_optional(self.target_distance_m),
+            "distance_to_authority_m": self._round_optional(distance_to_authority),
+            "eb_trigger_speed_kmh": self._round_optional(eb_trigger_speed),
+            "service_stop_distance_m": (
+                None if decision is None else self._round_optional(decision.service_stop_distance_m)
+            ),
+            "emergency_stop_distance_m": (
+                None if decision is None else self._round_optional(decision.emergency_stop_distance_m)
+            ),
+        }
+
+    def _atp_speed_limit_source(
+        self,
+        *,
+        track_speed_limit: float | None,
+        ma_allowed_speed: float | None,
+        external_speed_limit: float | None,
+        forced_stop: bool,
+        decision_allowed_speed: float | None,
+    ) -> str:
+        if forced_stop:
+            return "signal_stop"
+        candidates = []
+        if track_speed_limit is not None:
+            candidates.append(("track_map", float(track_speed_limit)))
+        if ma_allowed_speed is not None:
+            candidates.append(("ma_state", float(ma_allowed_speed)))
+        if external_speed_limit is not None:
+            candidates.append(("external_speed_limit", float(external_speed_limit)))
+        if not candidates:
+            return "none"
+        if decision_allowed_speed is None:
+            return min(candidates, key=lambda item: item[1])[0]
+        effective = float(decision_allowed_speed)
+        matching = [
+            source for source, value in candidates if abs(value - effective) <= 0.05
+        ]
+        if matching:
+            return "+".join(matching)
+        return min(candidates, key=lambda item: item[1])[0]
 
     def build_ato_state(self) -> dict:
         return {
@@ -1380,6 +1560,9 @@ class Train:
         self.state.applied_traction_level = self.applied_traction_level
         self.state.applied_brake_level = self.applied_brake_level
         self.state.control_source = self.control_source
+        self.state.ato_start_requested = self.ato_start_requested
+        self.state.ato_start_accepted = self.ato_start_accepted
+        self.state.ato_start_reject_reason = self.ato_start_reject_reason
         self.state.atp_intervened = self.atp_intervened
         self.state.stop_target = getattr(self, "stop_target_m", getattr(self, "stop_target", None))
         self.state.distance_to_stop = getattr(self, "distance_to_stop_m", getattr(self, "distance_to_stop", None))
@@ -1394,6 +1577,7 @@ class Train:
         self.state.curve_output_enabled = self.curve_output_enabled
         self.state.curve_history_size = self.curve_history_size
         self.state.curve_point = self.last_curve_point
+        self._sync_atp_debug_to_train_state()
 
     def _signed_distance_m(self, target_position_m: float) -> float:
         direction_sign = -1 if int(self.state.direction_code) < 0 else 1
