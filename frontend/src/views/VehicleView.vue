@@ -86,7 +86,7 @@
               <p class="mt-1 text-xs text-slate-500">`train_index` 可留空，后端会自动选择最小空闲槽位。</p>
             </div>
             <span class="rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-[11px] text-sky-200">
-              槽位 > 20 仍可存在，只是不进入固定 UDP 帧
+              当前手动管理只保留 001-003 三辆车
             </span>
           </div>
 
@@ -97,7 +97,7 @@
                 v-model.trim="manageForm.vehicle_id"
                 type="text"
                 class="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
-                placeholder="例如 TRAIN-011"
+                placeholder="例如 TRAIN-002"
               >
             </label>
             <label class="space-y-2 text-sm text-slate-300">
@@ -106,6 +106,7 @@
                 v-model.number="manageForm.train_index"
                 type="number"
                 min="1"
+                max="3"
                 class="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50"
                 placeholder="留空自动分配"
               >
@@ -136,7 +137,7 @@
             <button
               type="button"
               class="rounded-xl border border-emerald-700/50 bg-emerald-950/40 px-4 py-2.5 text-sm font-medium text-emerald-200 transition hover:border-emerald-500 disabled:opacity-45"
-              :disabled="store.managedTrainsLoading || !canManageVehicles"
+              :disabled="store.managedTrainsLoading || !canManageVehicles || hasReachedTrainLimit"
               @click="submitAddTrain"
             >
               添加车辆
@@ -144,12 +145,16 @@
             <button
               type="button"
               class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/10 disabled:opacity-45"
-              :disabled="store.managedTrainsLoading"
+              :disabled="store.managedTrainsLoading || hasReachedTrainLimit"
               @click="fillNextTrainSuggestion"
             >
               自动生成下一辆
             </button>
           </div>
+
+          <p class="mt-3 text-xs text-slate-500">
+            当前前端最多管理 3 辆车，并会尽量把 `TRAIN-001` 留到最后再删。
+          </p>
 
           <div class="mt-4 rounded-[1rem] border border-white/10 bg-slate-950/40 px-4 py-3 text-xs">
             <p class="text-slate-500">最近管理反馈</p>
@@ -171,7 +176,7 @@
           <div class="flex items-center justify-between gap-3">
             <div>
               <h4 class="text-sm font-semibold text-slate-100">管理列表</h4>
-              <p class="mt-1 text-xs text-slate-500">删除操作优先按 `vehicle_id`；若后端只返回槽位，也可按 `train_index` 删除。</p>
+              <p class="mt-1 text-xs text-slate-500">表格会优先把非 `TRAIN-001` 车辆排在前面，方便先删虚拟车、最后保留主控车。</p>
             </div>
             <span class="text-[11px] text-slate-500">
               {{ store.managedTrains.length }} 列
@@ -195,7 +200,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="train in store.managedTrains" :key="train.vehicle_id ?? train.train_index">
+                <tr v-for="train in managedTrainsForDisplay" :key="train.vehicle_id ?? train.train_index">
                   <td>
                     <div class="flex items-center gap-2">
                       <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: store.vehicleColor(train.vehicle_id ?? `slot-${train.train_index}`) }" />
@@ -243,7 +248,7 @@
           </div>
 
           <div v-else class="mt-4 rounded-xl border border-dashed border-white/10 bg-black/10 px-4 py-8 text-center text-sm text-slate-500">
-            当前还没有管理中的车辆。你可以先添加一辆车，或者用“重置车辆”恢复默认 10 列。
+            当前还没有管理中的车辆。你可以先添加一辆车，或者用“重置车辆”恢复默认 3 列。
           </div>
         </div>
       </div>
@@ -809,6 +814,7 @@ import { useUiStore } from '@/stores/ui'
 
 const store = usePageSimulation()
 const ui = useUiStore()
+const MAX_MANAGED_TRAINS = 3
 const active = computed(() => store.selectedVehicle)
 const canManualControl = computed(() => active.value?.mode === 'manual')
 const now = ref(Date.now())
@@ -840,6 +846,15 @@ const activeAtoCommand = computed(() =>
 )
 
 const canManageVehicles = computed(() => store.vehicleManagementMode === 'full')
+const hasReachedTrainLimit = computed(() => store.managedTrains.length >= MAX_MANAGED_TRAINS)
+const managedTrainsForDisplay = computed(() =>
+  [...store.managedTrains].sort((left, right) => {
+    const leftIsPrimary = left.vehicle_id === 'TRAIN-001'
+    const rightIsPrimary = right.vehicle_id === 'TRAIN-001'
+    if (leftIsPrimary !== rightIsPrimary) return leftIsPrimary ? 1 : -1
+    return Number(left.train_index ?? Number.MAX_SAFE_INTEGER) - Number(right.train_index ?? Number.MAX_SAFE_INTEGER)
+  })
+)
 const managementModeLabel = computed(() => {
   if (store.vehicleManagementMode === 'full') return '管理接口已接入'
   if (store.vehicleManagementMode === 'status_fallback') return '旧后端兼容模式'
@@ -1253,7 +1268,16 @@ async function submitAddTrain() {
     explainMissingManageEndpoint()
     return
   }
+  if (hasReachedTrainLimit.value) {
+    showTrainLimitToast()
+    return
+  }
   const payload = buildAddTrainPayload()
+  const requestedIndex = resolveRequestedTrainIndex(payload)
+  if (requestedIndex != null && requestedIndex > MAX_MANAGED_TRAINS) {
+    showTrainLimitToast(`当前只支持 1-${MAX_MANAGED_TRAINS} 号车辆`)
+    return
+  }
   const response = await store.submitVehicleManage(payload)
   if (response?.ok) {
     resetManageForm()
@@ -1290,9 +1314,10 @@ function requestRemoveTrain(train) {
       const payload = train.vehicle_id
         ? { type: 'remove_train', vehicle_id: train.vehicle_id }
         : { type: 'remove_train', train_index: train.train_index }
-      await store.submitVehicleManage(payload)
+      const response = await store.submitVehicleManage(payload)
+      if (!response?.ok) return
       if (store.selectedVehicleId === train.vehicle_id) {
-        const nextLive = store.vehicles[0]?.vehicle_id ?? null
+        const nextLive = resolvePreferredRemainingVehicleId(train.vehicle_id)
         store.selectVehicle(nextLive)
       }
       fillNextTrainSuggestion()
@@ -1312,7 +1337,10 @@ function requestClearTrains() {
     cancelLabel: '取消',
     destructive: true,
     onConfirm: async () => {
-      await store.submitVehicleManage({ type: 'clear_trains' })
+      const response = await store.submitVehicleManage({ type: 'clear_trains' })
+      if (response?.ok) {
+        store.selectVehicle(null)
+      }
       fillNextTrainSuggestion()
     },
   })
@@ -1330,15 +1358,17 @@ function requestResetTrains() {
     cancelLabel: '取消',
     destructive: false,
     onConfirm: async () => {
-      await store.submitVehicleManage({ type: 'reset_trains', count: resolveResetCount() })
+      const response = await store.submitVehicleManage({ type: 'reset_trains', count: resolveResetCount() })
+      if (response?.ok) {
+        store.selectVehicle(resolvePreferredRemainingVehicleId())
+      }
       fillNextTrainSuggestion()
     },
   })
 }
 
 function resolveResetCount() {
-  const current = store.managedTrains.length
-  return current > 0 ? current : 10
+  return MAX_MANAGED_TRAINS
 }
 
 function resetManageForm() {
@@ -1350,19 +1380,26 @@ function resetManageForm() {
 
 function fillNextTrainSuggestion() {
   const nextIndex = resolveNextTrainIndex()
+  if (nextIndex == null) {
+    manageForm.train_index = null
+    manageForm.vehicle_id = ''
+    return
+  }
   manageForm.train_index = nextIndex
   manageForm.vehicle_id = `TRAIN-${String(nextIndex).padStart(3, '0')}`
 }
 
 function resolveNextTrainIndex() {
+  if (hasReachedTrainLimit.value) return null
   const used = new Set(
     store.managedTrains
       .map((train) => Number(train.train_index))
       .filter(Number.isFinite),
   )
-  let next = 1
-  while (used.has(next)) next += 1
-  return next
+  for (let next = 1; next <= MAX_MANAGED_TRAINS; next += 1) {
+    if (!used.has(next)) return next
+  }
+  return null
 }
 
 function manageActionLabel(type) {
@@ -1381,6 +1418,38 @@ function explainMissingManageEndpoint() {
     message: '你现在这个后端版本缺少 /api/v1/vehicle/manage 和 /api/v1/vehicle/trains，所以前端暂时只能做兼容显示，不能直接增删车辆。',
     duration: 4200,
   })
+}
+
+function showTrainLimitToast(message = `当前最多管理 ${MAX_MANAGED_TRAINS} 辆车`) {
+  ui.showToast({
+    type: 'warning',
+    title: '车辆数量已达上限',
+    message,
+    duration: 3000,
+  })
+}
+
+function resolvePreferredRemainingVehicleId(excludedVehicleId = null) {
+  const ids = [...new Set(
+    [...store.managedTrains, ...store.vehicles]
+      .map((train) => train.vehicle_id)
+      .filter(Boolean),
+  )]
+  return ids.find((id) => id !== excludedVehicleId && id !== 'TRAIN-001')
+    ?? ids.find((id) => id !== excludedVehicleId)
+    ?? null
+}
+
+function resolveRequestedTrainIndex(payload) {
+  if (Number.isFinite(Number(payload?.train_index))) {
+    return Number(payload.train_index)
+  }
+  return parseTrainIndex(payload?.vehicle_id)
+}
+
+function parseTrainIndex(vehicleId) {
+  const match = String(vehicleId ?? '').match(/(\d+)$/)
+  return match ? Number(match[1]) : null
 }
 
 function directionText(direction) {

@@ -31,6 +31,7 @@ const SNAPSHOT_FALLBACK_MS = 5000
 const SCENE_STATE_POLL_MS = 2500
 const SIGNAL_PROTOCOL_POLL_MS = 4000
 const MANAGED_TRAINS_POLL_MS = 3000
+const MAX_MANAGED_TRAINS = 3
 
 function mergeCollectionById(primary = [], overlay = [], primaryId = 'segment_id', overlayId = primaryId) {
   if (!primary.length) return overlay
@@ -285,8 +286,8 @@ export const useSimulationStore = defineStore('simulation', () => {
   )
 
   const totalLength = computed(() =>
-    tick.value?.track_info?.total_length
-    || lineLayout.totalLength
+    lineLayout.totalLength
+    || tick.value?.track_info?.total_length
     || tick.value?.total_length
     || 5000
   )
@@ -617,7 +618,9 @@ export const useSimulationStore = defineStore('simulation', () => {
       const response = await manageVehicle(payload)
       const ok = Boolean(response?.ok)
       const trains = normalizeManagedTrainList(response)
-      if (trains.length || type === 'clear_trains' || (type === 'reset_trains' && Number(payload?.count) === 0)) {
+      const rawReason = response?.result?.reason ?? response?.reason ?? null
+      const reason = describeVehicleManageReason(rawReason, response)
+      if (Array.isArray(response?.trains)) {
         managedTrains.value = trains
       }
       lastManagedSyncAt.value = Date.now()
@@ -627,12 +630,11 @@ export const useSimulationStore = defineStore('simulation', () => {
         published: Boolean(response?.published),
         topic: response?.topic ?? null,
         result: response?.result ?? null,
-        reason: response?.result?.reason ?? response?.reason ?? null,
+        reason,
         at: Date.now(),
       }
 
       if (!ok) {
-        const reason = response?.result?.reason ?? response?.reason ?? `${type}_failed`
         managedTrainsError.value = reason
         ui.showToast({
           type: 'warning',
@@ -1144,4 +1146,20 @@ function buildVehicleManageToastMessage(response) {
   const count = Array.isArray(response?.trains) ? `当前 ${response.trains.length} 列` : null
   const published = response?.published === false ? '消息总线未发布' : null
   return [count, topic, published].filter(Boolean).join(' · ') || '车辆列表已刷新'
+}
+
+function describeVehicleManageReason(reason, response) {
+  if (!reason) return null
+  if (reason === 'train_limit_reached') {
+    const limit = Number(response?.result?.limit ?? MAX_MANAGED_TRAINS)
+    return `当前最多管理 ${limit} 辆车`
+  }
+  if (reason === 'train_index_out_of_supported_range') {
+    const limit = Number(response?.result?.limit ?? MAX_MANAGED_TRAINS)
+    return `当前只支持 1-${limit} 号车辆`
+  }
+  if (reason === 'slot_occupied') return '该槽位已被占用，请换一个槽位'
+  if (reason === 'vehicle_id_exists') return '该车辆编号已存在，请换一个编号'
+  if (reason === 'train_not_found') return '未找到要删除的车辆'
+  return reason
 }

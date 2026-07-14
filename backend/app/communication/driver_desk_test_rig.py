@@ -19,13 +19,61 @@ from app.communication.driver_desk_source import (
     MAIN_HANDLE_TRAC,
     DriverDeskSource,
 )
-from app.communication.message_bus import MessageBus
 from app.communication.plc_feedback_aggregator import PlcFeedbackAggregator
 from app.core.config import settings
 
 UPLINK_FRAME_FMT = "<IHHHHHHHHHHBBH"
 UPLINK_FRAME_LEN = struct.calcsize(UPLINK_FRAME_FMT)
 UPLINK_FRAME_MAGIC = 0xAA55AA55
+
+
+class PublishOnlyBus:
+    """Minimal bus for TCP protocol testing when local pyzmq is unavailable."""
+
+    def __init__(self, pub_address: str | None = None) -> None:
+        self.pub_address = pub_address or settings.ZMQ_BROKER_BACKEND
+        self._lock = threading.Lock()
+        self.published_count = 0
+        self.last_topic: str | None = None
+        self.last_data: dict | None = None
+
+    def start(self) -> None:
+        return
+
+    def publish(self, topic: str, data: dict) -> None:
+        with self._lock:
+            self.published_count += 1
+            self.last_topic = topic
+            self.last_data = dict(data)
+        try:
+            if topic == "driver_input":
+                from app.api.v1.endpoints.vehicle import vehicle_message_router
+                from app.data_flow.state_store import state_store
+
+                vehicle_id = str(data.get("vehicle_id") or "TRAIN-001")
+                routed = {"type": "driver_input", **data}
+                routed.setdefault("source", "driver_tcp")
+                vehicle_message_router.handle(routed)
+                state_store.update_driver_input(vehicle_id, routed)
+            elif topic == "comm_state":
+                from app.api.v1.endpoints.vehicle import vehicle_message_router
+                from app.data_flow.state_store import state_store
+
+                routed = {"type": "comm_state", **data}
+                vehicle_message_router.handle(routed)
+                state_store.update_comm(routed)
+        except Exception:
+            # Keep the TCP protocol rig alive even if the optional in-process bridge fails.
+            return
+
+    def subscribe(self, _topic: str, _handler: Any) -> None:
+        return
+
+    def unsubscribe(self, _topic: str, _handler: Any = None) -> None:
+        return
+
+    def stop(self) -> None:
+        return
 
 
 class DriverDeskBridgeService:
@@ -42,7 +90,7 @@ class DriverDeskBridgeService:
     def start(self, *, vehicle_id: str, plc_host: str, plc_port: int) -> dict[str, Any]:
         self.stop()
 
-        bus = MessageBus()
+        bus = PublishOnlyBus()
         bus.start()
         source = DriverDeskSource(
             vehicle_id=vehicle_id,
@@ -56,14 +104,6 @@ class DriverDeskBridgeService:
                 source.send_to_plc(**kwargs)
 
         aggregator = PlcFeedbackAggregator(safe_send_to_plc)
-        aggregator.attach(bus)
-        aggregator.set_active_vehicle_id(vehicle_id)
-        bus.subscribe("driver_desk_binding", self._on_driver_desk_binding)
-        bus.subscribe("driver_input", self._on_driver_input)
-        bus.subscribe("comm_state", self._on_comm_state)
-        bus.subscribe("train_state", self._on_feedback_state)
-        bus.subscribe("ato_state", self._on_feedback_state)
-        bus.subscribe("door_state", self._on_feedback_state)
         with self._lock:
             self._bus_diagnostics = self._empty_bus_diagnostics()
 
@@ -88,22 +128,6 @@ class DriverDeskBridgeService:
             self._aggregator = None
             self._running = False
 
-        if bus is not None:
-            try:
-                bus.unsubscribe("driver_desk_binding", self._on_driver_desk_binding)
-            except Exception:
-                pass
-            for topic, handler in (
-                ("driver_input", self._on_driver_input),
-                ("comm_state", self._on_comm_state),
-                ("train_state", self._on_feedback_state),
-                ("ato_state", self._on_feedback_state),
-                ("door_state", self._on_feedback_state),
-            ):
-                try:
-                    bus.unsubscribe(topic, handler)
-                except Exception:
-                    pass
         if aggregator is not None:
             aggregator.stop()
         if source is not None:
@@ -122,7 +146,10 @@ class DriverDeskBridgeService:
             running = self._running
             bus_diagnostics = dict(self._bus_diagnostics)
         source_status = source.status() if source is not None else None
-        aggregator_status = aggregator.snapshot() if aggregator is not None else None
+        aggregator_status = {
+            "running": aggregator is not None,
+            "interval_sec": aggregator.interval_sec if aggregator is not None else None,
+        } if aggregator is not None else None
         warnings = []
         if settings.DATA_SOURCE != "zmq":
             warnings.append("dashboard_listener_inactive_until_data_source_is_zmq")
@@ -708,15 +735,23 @@ class DriverDeskTestRigService:
             vehicle_id=vehicle_id,
             pulse_width_ms=pulse_width_ms,
         )
-        simulator.start()
-        self._bridge.start(
-            vehicle_id=vehicle_id,
-            plc_host=simulator_host,
-            plc_port=simulator_port,
-        )
-        with self._lock:
-            self._simulator = simulator
-        return self.snapshot()
+        try:
+            simulator.start()
+            with self._lock:
+                self._simulator = simulator
+            self._bridge.start(
+                vehicle_id=vehicle_id,
+                plc_host=simulator_host,
+                plc_port=simulator_port,
+            )
+            return self.snapshot()
+        except Exception:
+            self._bridge.stop()
+            simulator.stop()
+            with self._lock:
+                if self._simulator is simulator:
+                    self._simulator = None
+            raise
 
     def stop(self) -> dict[str, Any]:
         with self._lock:

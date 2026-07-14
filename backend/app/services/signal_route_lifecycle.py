@@ -151,6 +151,41 @@ class RouteLifecycleManager:
                 results.append(result)
         return results
 
+    def remove_vehicle(self, vehicle_id: str | None) -> None:
+        if not vehicle_id:
+            return
+        with self.lock:
+            route_ids_to_release = []
+            keys_to_remove = []
+            for key, route_state in self.route_states.items():
+                if route_state.get("vehicle_id") != vehicle_id:
+                    continue
+                route_id = route_state.get("route_id")
+                if route_id:
+                    route_ids_to_release.append(route_id)
+                keys_to_remove.append(key)
+
+            for route_id in route_ids_to_release:
+                self._release_locks_for_route(route_id)
+            for key in keys_to_remove:
+                self.route_states.pop(key, None)
+
+            self.last_route_results = [
+                result
+                for result in self.last_route_results
+                if result.get("vehicle_id") != vehicle_id
+            ]
+
+    def clear_runtime_state(self) -> None:
+        with self.lock:
+            self.route_states.clear()
+            self.section_locks.clear()
+            self.switch_locks.clear()
+            self.switch_runtime_states.clear()
+            self.last_route_results = []
+            self._initialize_switch_runtime_states()
+            self._initialize_switch_locks()
+
     def get_route_states(self) -> list[dict]:
         with self.lock:
             return sorted(

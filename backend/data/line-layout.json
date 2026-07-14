@@ -1,7 +1,7 @@
 {
   "source": "backend/线路数据(1).xls",
   "line_id": "LINE-1",
-  "total_length_m": 47503.7,
+  "total_length_m": 16048.9,
   "seg_count": 319,
   "graph": {
     "edges": [

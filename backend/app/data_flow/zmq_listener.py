@@ -209,9 +209,13 @@ class ZmqDashboardListener:
             state_store.update_signal_state(data)
         elif message_type == "ma_state":
             ma_limits = data.get("ma_limits")
+            replace_existing = ma_limits is not None
             if ma_limits is None and data.get("vehicle_id"):
                 ma_limits = [data]
-            state_store.update_ma_limits(ma_limits or [])
+            state_store.update_ma_limits(
+                ma_limits or [],
+                replace_existing=replace_existing,
+            )
         elif message_type == "track_info":
             state_store.update_track_info(data)
         elif message_type in {"route_request", "route_apply", "route_application"}:

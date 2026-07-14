@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import List, Optional
 
@@ -26,6 +27,8 @@ from app.vehicle_sim.train_manager import TrainManager
 router = APIRouter()
 service = VehicleService()
 logger = logging.getLogger("uvicorn.error")
+MAX_MANAGED_TRAINS = 3
+DEFAULT_RESET_TRAIN_COUNT = 3
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +487,14 @@ def get_trip_status(vehicle_id: str) -> TripStatusResponse:
 
 @router.post("/manage", response_model=VehicleManagementResponse, summary="Manage vehicle simulation trains")
 async def manage_vehicle(command: VehicleManagementRequest) -> VehicleManagementResponse:
-    if command.type == "add_train" and not _is_physical_driver_train(command):
-        return await _enqueue_ato_train(command)
-    if command.type == "remove_train" and command.vehicle_id:
-        line_operation_service.forget_train(command.vehicle_id)
+    command = _normalize_vehicle_management_command(command)
+    rejected = _reject_unsupported_vehicle_management_command(command)
+    if rejected is not None:
+        return rejected
+    if command.type in {"clear_trains", "reset_trains"}:
+        await line_operation_service.stop()
+    if command.type == "remove_train":
+        line_operation_service.forget_train(command.vehicle_id, command.train_index)
     return _manage_vehicle_command(command)
 
 
@@ -549,33 +556,75 @@ def get_line_operation_status() -> dict:
     return line_operation_service.status()
 
 
-async def _enqueue_ato_train(command: VehicleManagementRequest) -> VehicleManagementResponse:
-    await station_demo_service.stop()
-    if not line_operation_service.active:
-        await line_operation_service.start(_manage_vehicle_command)
+def _normalize_vehicle_management_command(command: VehicleManagementRequest) -> VehicleManagementRequest:
+    if command.type != "reset_trains":
+        return command
 
-    result = line_operation_service.enqueue_train(
-        vehicle_id=command.vehicle_id,
-        train_index=command.train_index,
-    )
+    requested_count = DEFAULT_RESET_TRAIN_COUNT if command.count is None else int(command.count)
+    normalized_count = max(0, min(MAX_MANAGED_TRAINS, requested_count))
+    if command.count == normalized_count:
+        return command
+    return command.model_copy(update={"count": normalized_count})
+
+
+def _reject_unsupported_vehicle_management_command(
+    command: VehicleManagementRequest,
+) -> VehicleManagementResponse | None:
+    if command.type != "add_train":
+        return None
+
     trains = vehicle_process_manager.enrich_trains(vehicle_manager.list_trains())
+    if len(trains) >= MAX_MANAGED_TRAINS:
+        return _build_vehicle_management_rejection(
+            command,
+            trains,
+            reason="train_limit_reached",
+            limit=MAX_MANAGED_TRAINS,
+        )
+
+    requested_index = _infer_requested_train_index(command)
+    if requested_index is not None and requested_index > MAX_MANAGED_TRAINS:
+        return _build_vehicle_management_rejection(
+            command,
+            trains,
+            reason="train_index_out_of_supported_range",
+            limit=MAX_MANAGED_TRAINS,
+            train_index=requested_index,
+        )
+
+    return None
+
+
+def _build_vehicle_management_rejection(
+    command: VehicleManagementRequest,
+    trains: list[dict],
+    *,
+    reason: str,
+    **extra: object,
+) -> VehicleManagementResponse:
     state_store.replace_trains(trains, prune_absent=True)
     return VehicleManagementResponse(
-        ok=bool(result.get("ok", False)),
-        published=not bool(result.get("queued", False)),
-        topic="add_train",
+        ok=False,
+        published=False,
+        topic=command.type,
         result={
-            **result,
-            "control_policy": "non_001_added_to_onboard_ato_queue",
+            "ok": False,
+            "reason": reason,
+            **extra,
         },
         trains=trains,
     )
 
 
-def _is_physical_driver_train(command: VehicleManagementRequest) -> bool:
-    if command.vehicle_id is not None:
-        return str(command.vehicle_id).upper() == "TRAIN-001"
-    return command.train_index == 1
+def _infer_requested_train_index(command: VehicleManagementRequest) -> int | None:
+    if command.train_index is not None:
+        return int(command.train_index)
+    if not command.vehicle_id:
+        return None
+    match = re.search(r"(\d+)$", str(command.vehicle_id))
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def _manage_vehicle_command(command: VehicleManagementRequest) -> VehicleManagementResponse:
@@ -713,7 +762,7 @@ def _build_vehicle_management_message(command: VehicleManagementRequest) -> dict
     if command.type == "reset_trains":
         return {
             "type": command.type,
-            "count": 10 if command.count is None else command.count,
+            "count": DEFAULT_RESET_TRAIN_COUNT if command.count is None else min(MAX_MANAGED_TRAINS, int(command.count)),
         }
 
     return {"type": command.type}

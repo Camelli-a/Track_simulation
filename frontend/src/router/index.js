@@ -57,6 +57,16 @@ const routes = [
         },
       },
       {
+        path: 'driver-desk-sim',
+        component: () => import('@/views/DriverDeskSimView.vue'),
+        meta: {
+          title: '司机台联调',
+          section: '硬件联调',
+          subtitle: '用本地司机台协议模拟器打通后端 TCP 收发、车辆状态联动和司机台灯光回写。',
+          opsHint: '先启动 Broker、后端和车辆进程，再启动本页联调；不要同时接真实司机台或另一个同车输入源。',
+        },
+      },
+      {
         path: 'power',
         component: () => import('@/views/PowerView.vue'),
         meta: {

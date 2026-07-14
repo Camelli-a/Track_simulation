@@ -98,7 +98,13 @@ class SignalZmqAdapter:
         with self.lock:
             self.train_states_by_id.pop(str(vehicle_id), None)
             self.train_last_update_at.pop(str(vehicle_id), None)
+            self.route_requests = [
+                request
+                for request in self.route_requests
+                if request.get("vehicle_id") != str(vehicle_id)
+            ]
             self.active_alarm_keys.discard(f"train_state_timeout:{vehicle_id}")
+        self.route_lifecycle_manager.remove_vehicle(str(vehicle_id))
         if self.publish_on_update:
             self.publish_signal_outputs()
 
@@ -106,11 +112,15 @@ class SignalZmqAdapter:
         with self.lock:
             self.train_states_by_id.clear()
             self.train_last_update_at.clear()
+            self.route_requests.clear()
             self.active_alarm_keys = {
                 key
                 for key in self.active_alarm_keys
                 if not key.startswith("train_state_timeout:")
             }
+        self.route_lifecycle_manager.clear_runtime_state()
+        if self.publish_on_update:
+            self.publish_signal_outputs()
 
     def on_route_request(self, topic: str, data: dict) -> None:
         request_type = str(data.get("request_type", "open")).strip().lower()
@@ -153,9 +163,6 @@ class SignalZmqAdapter:
             train_states = list(self.train_states_by_id.values())
             route_requests = list(self.route_requests)
             last_update_by_id = dict(self.train_last_update_at)
-
-        if not train_states:
-            return
 
         self.route_lifecycle_manager.update_by_train_states(train_states)
         snapshot = calculate_signal_snapshot(train_states, route_requests)

@@ -8,6 +8,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+import app.services.signal_service as signal_service_module  # noqa: E402
+from app.data_flow.state_store import DashboardStateStore  # noqa: E402
 from app.services.signal_control import (  # noqa: E402
     build_ma_state_message,
     build_signal_state_message,
@@ -271,6 +273,174 @@ def test_branch_route_request_conflicts_with_locked_main_switch():
     assert result["required_position"] == "reverse"
     assert result["current_position"] == "normal"
     assert result["locked_by_route_id"] == "R_MAIN"
+
+
+def test_state_store_signal_update_clears_stale_section_runtime_fields():
+    store = DashboardStateStore()
+
+    store.update_signal_state(
+        {
+            "sections": [
+                {
+                    "section_id": "JZ1",
+                    "start": 500.0,
+                    "end": 700.0,
+                    "occupied": True,
+                    "vehicle_id": "TRAIN-001",
+                    "locked": True,
+                    "locked_by_route_id": "R_MAIN",
+                    "condition": "normal",
+                }
+            ]
+        }
+    )
+    store.update_signal_state(
+        {
+            "sections": [
+                {
+                    "section_id": "JZ1",
+                    "start": 500.0,
+                    "end": 700.0,
+                    "occupied": False,
+                    "vehicle_id": None,
+                    "locked": False,
+                    "locked_by_route_id": None,
+                    "condition": "normal",
+                }
+            ]
+        }
+    )
+
+    section = next(item for item in store.get_snapshot().sections if item.section_id == "JZ1")
+    assert section.occupied is False
+    assert section.vehicle_id is None
+    assert section.locked is False
+    assert section.locked_by_route_id is None
+
+
+def test_state_store_replace_ma_limits_clears_removed_vehicles():
+    store = DashboardStateStore()
+
+    store.update_ma_limits(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 620.0,
+                "route_id": "R_MAIN",
+                "ma_limit": 1200.0,
+                "permission": "allow",
+                "signal_state": "green",
+                "speed_limit": 48.0,
+                "target_speed": 48.0,
+                "reason": "route_end",
+                "updated_at": 1.0,
+            }
+        ]
+    )
+    assert [item.vehicle_id for item in store.get_snapshot().ma_limits] == ["TRAIN-001"]
+
+    store.update_ma_limits([], replace_existing=True)
+
+    assert store.get_snapshot().ma_limits == []
+
+
+def test_signal_status_endpoint_survives_last_train_cleanup(monkeypatch):
+    store = DashboardStateStore()
+    monkeypatch.setattr(signal_service_module, "state_store", store)
+
+    store.update_signal_state(
+        {
+            "system_mode": "normal",
+            "sections": [
+                {
+                    "section_id": "JZ1",
+                    "start": 500.0,
+                    "end": 700.0,
+                    "occupied": True,
+                    "vehicle_id": "TRAIN-001",
+                    "locked": True,
+                    "locked_by_route_id": "R_MAIN",
+                    "condition": "normal",
+                }
+            ],
+            "signals": [
+                {
+                    "signal_id": "S-001",
+                    "position": 700.0,
+                    "state": "red",
+                    "signal_state": "red",
+                    "permission": "stop",
+                    "route_id": "R_MAIN",
+                }
+            ],
+            "switches": [
+                {
+                    "switch_id": "SW-01",
+                    "position": "normal",
+                    "locked": True,
+                    "locked_by_route_id": "R_MAIN",
+                    "related_section": "JZ1",
+                    "reason": "route_lifecycle_locked",
+                }
+            ],
+            "route_results": [
+                {
+                    "vehicle_id": "TRAIN-001",
+                    "route_id": "R_MAIN",
+                    "allowed": True,
+                }
+            ],
+        }
+    )
+    store.update_ma_limits(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 620.0,
+                "route_id": "R_MAIN",
+                "ma_limit": 1200.0,
+                "permission": "allow",
+                "signal_state": "green",
+                "speed_limit": 48.0,
+                "target_speed": 48.0,
+                "reason": "route_end",
+                "updated_at": 1.0,
+            }
+        ]
+    )
+
+    store.update_signal_state(
+        {
+            "system_mode": "normal",
+            "sections": [
+                {
+                    "section_id": "JZ1",
+                    "start": 500.0,
+                    "end": 700.0,
+                    "occupied": False,
+                    "vehicle_id": None,
+                    "locked": False,
+                    "locked_by_route_id": None,
+                    "condition": "normal",
+                }
+            ],
+            "signals": [],
+            "switches": [],
+            "route_results": [],
+        }
+    )
+    store.update_ma_limits([], replace_existing=True)
+
+    response = TestClient(app).get("/api/v1/signal/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ma_limits"] == []
+    assert data["signals"] == []
+    section = next(item for item in data["sections"] if item["section_id"] == "JZ1")
+    assert section["occupied"] is False
+    assert section["vehicle_id"] is None
+    assert section["locked_by_route_id"] is None
 
 
 def test_signal_status_endpoint_returns_snapshot_fields():

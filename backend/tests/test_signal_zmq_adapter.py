@@ -127,6 +127,30 @@ def test_remove_train_clears_cached_train_state():
     assert "TRAIN-001" not in adapter.train_last_update_at
 
 
+def test_remove_last_train_publishes_empty_snapshot_and_clears_route_runtime():
+    fake_bus = FakeBus()
+    adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=True)
+
+    adapter.on_train_state("train_state", _train_state())
+    adapter.on_route_request(
+        "route_request",
+        {
+            "vehicle_id": "TRAIN-001",
+            "route_id": "R_MAIN",
+        },
+    )
+    fake_bus.published.clear()
+
+    adapter.on_remove_train("remove_train", {"vehicle_id": "TRAIN-001"})
+
+    assert adapter.route_requests == []
+    assert adapter.route_lifecycle_manager.get_route_states() == []
+    assert _published_data(fake_bus, "signal_state")[-1]["route_results"] == []
+    assert _published_data(fake_bus, "signal_state")[-1]["signals"] == []
+    assert _published_data(fake_bus, "ma_state")[-1]["ma_limits"] == []
+    assert _published_data(fake_bus, "ato_command")[-1]["commands"] == []
+
+
 def test_publish_outputs_normal_when_train_state_not_stale():
     fake_bus = FakeBus()
     adapter = SignalZmqAdapter(bus=fake_bus, publish_on_update=False)

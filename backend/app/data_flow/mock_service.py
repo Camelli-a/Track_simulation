@@ -14,13 +14,10 @@ class MockDashboardService:
     def __init__(self, store: DashboardStateStore = state_store) -> None:
         self.store = store
         self.start_time = time.time()
+        self._last_tick_at = self.start_time
         self.line_length = 5000.0
         self.section_length = 500.0
-        self.vehicle_offsets = {
-            "TRAIN-001": 0.0,
-            "TRAIN-002": 950.0,
-            "TRAIN-003": 1800.0,
-        }
+        self._vehicle_runtime: Dict[str, dict] = {}
         self.stations = [
             {"station_id": "STA-01", "name": "中心站", "position": 1250.0, "platform_id": "PF-01"},
             {"station_id": "STA-02", "name": "东环站", "position": 3750.0, "platform_id": "PF-02"},
@@ -29,17 +26,28 @@ class MockDashboardService:
 
     def tick(self) -> None:
         now = time.time()
+        dt = max(0.05, min(now - self._last_tick_at, 1.0))
+        self._last_tick_at = now
         elapsed = now - self.start_time
-        train_positions: Dict[str, float] = {}
+        managed_trains = self._load_managed_trains()
+        ordered_runtime = self._sync_vehicle_runtime(managed_trains)
 
-        for index, (vehicle_id, offset) in enumerate(self.vehicle_offsets.items(), start=1):
-            speed = 42.0 + index * 8.0 + 5.0 * math.sin(elapsed / 5.0 + index)
-            position = (offset + elapsed * (speed / 3.6)) % self.line_length
-            acceleration = 0.15 * math.cos(elapsed / 4.0 + index)
-            ma_limit = min(self.line_length, position + 650.0)
-            emergency = speed > 80.0
-            mode = "ato" if index != 2 else "manual"
-            route_id = "R_MAIN" if index != 3 else "R_BRANCH"
+        self.store.replace_trains(managed_trains, prune_absent=True)
+        train_positions: Dict[str, float] = {}
+        route_results: List[dict] = []
+
+        for index, runtime in enumerate(ordered_runtime, start=1):
+            vehicle_id = runtime["vehicle_id"]
+            speed = 36.0 + (index % 4) * 8.0 + 5.0 * math.sin(elapsed / 5.0 + index)
+            speed = max(12.0, min(speed, 78.0))
+            prev_speed = float(runtime.get("speed", speed))
+            position = (float(runtime.get("position", 0.0)) + speed / 3.6 * dt) % self.line_length
+            acceleration = (speed - prev_speed) / 3.6 / dt if dt > 0 else 0.0
+            ma_span = 820.0 + (index % 5) * 130.0
+            ma_limit = min(self.line_length, position + ma_span)
+            emergency = speed > 76.0
+            mode = runtime["drive_mode"]
+            route_id = runtime["route_id"]
             permission = "stop" if emergency else ("restricted" if ma_limit - position < 700 else "allow")
             signal_state = "red" if permission == "stop" else ("yellow" if permission == "restricted" else "green")
             speed_limit = 30.0 if permission == "restricted" else 60.0
@@ -48,13 +56,26 @@ class MockDashboardService:
             stop_distance = abs(station["position"] - position)
             parking_phase = self._parking_phase(stop_distance, speed)
             stop_error_cm = self._stop_error_cm(stop_distance, parking_phase)
+            front_vehicle_id = (
+                ordered_runtime[index]["vehicle_id"]
+                if index < len(ordered_runtime)
+                else None
+            )
+
+            runtime["position"] = position
+            runtime["speed"] = speed
+            runtime["energy_kwh"] = round(
+                float(runtime.get("energy_kwh", 30.0 + index * 4.0)) + max(speed, 0.0) * dt / 3600 * 0.12,
+                2,
+            )
 
             train_positions[vehicle_id] = position
             self.store.update_train(
                 vehicle_id,
                 {
                     "vehicle_id": vehicle_id,
-                    "line_id": "LINE-1",
+                    "train_index": runtime["train_index"],
+                    "line_id": runtime["line_id"],
                     "route_id": route_id,
                     "position": round(position, 2),
                     "speed": round(speed, 2),
@@ -67,7 +88,7 @@ class MockDashboardService:
                     "signal_state": signal_state,
                     "speed_limit": speed_limit,
                     "target_speed": round(target_speed, 2),
-                    "energy_kwh": round(45.0 + index * 7.5 + elapsed * (0.02 + index * 0.004), 2),
+                    "energy_kwh": runtime["energy_kwh"],
                     "stop_distance": round(stop_distance, 2),
                     "station_name": station["name"],
                     "parking_phase": parking_phase,
@@ -88,7 +109,7 @@ class MockDashboardService:
                         "speed_limit": speed_limit,
                         "target_speed": round(target_speed, 2),
                         "reason": "front_train" if index != 1 else "route_end",
-                        "front_vehicle_id": f"TRAIN-{index + 1:03d}" if index != 3 else None,
+                        "front_vehicle_id": front_vehicle_id,
                         "safe_distance": 120.0,
                         "updated_at": now,
                     }
@@ -113,9 +134,9 @@ class MockDashboardService:
                 vehicle_id,
                 {
                     "vehicle_id": vehicle_id,
-                    "line_id": "LINE-1",
+                    "line_id": runtime["line_id"],
                     "source": "mock",
-                    "traction_level": 2 + index,
+                    "traction_level": min(4, 1 + (index % 4)),
                     "brake_level": 0 if speed < 70 else 1,
                     "direction": "forward",
                     "control_mode": mode if mode in {"manual", "ato"} else "manual",
@@ -123,6 +144,19 @@ class MockDashboardService:
                     "updated_at": now,
                 },
             )
+            if route_id == "R_BRANCH":
+                route_results.append(
+                    {
+                        "vehicle_id": vehicle_id,
+                        "route_id": route_id,
+                        "allowed": int(elapsed // 20) % 2 == 0,
+                        "reason": None if int(elapsed // 20) % 2 == 0 else "switch_locked_conflict",
+                        "required_switch_id": "SW-01",
+                        "required_position": "reverse",
+                        "current_position": "reverse" if int(elapsed // 20) % 2 == 0 else "normal",
+                        "locked_by_route_id": "R_MAIN" if int(elapsed // 20) % 2 != 0 else None,
+                    }
+                )
 
         self.store.update_track_info(
             {
@@ -137,7 +171,7 @@ class MockDashboardService:
                 "sections": self._build_sections(train_positions),
                 "signals": self._build_signals(train_positions),
                 "switches": self._build_switches(elapsed),
-                "route_results": self._build_route_results(elapsed),
+                "route_results": route_results,
             }
         )
         voltage = 1500.0 + 35.0 * math.sin(elapsed / 3.0)
@@ -164,6 +198,71 @@ class MockDashboardService:
             }
         )
         self._maybe_add_alarm(now, voltage)
+
+    def _load_managed_trains(self) -> List[dict]:
+        try:
+            from app.api.v1.endpoints.vehicle import vehicle_manager
+
+            return vehicle_manager.list_trains()
+        except Exception:
+            return [
+                {
+                    "vehicle_id": runtime["vehicle_id"],
+                    "train_index": runtime["train_index"],
+                    "line_id": runtime["line_id"],
+                    "position": runtime["position"],
+                    "mode": runtime["drive_mode"],
+                }
+                for runtime in self._vehicle_runtime.values()
+            ]
+
+    def _sync_vehicle_runtime(self, managed_trains: List[dict]) -> List[dict]:
+        ordered_trains = sorted(
+            (item for item in managed_trains if item.get("vehicle_id")),
+            key=lambda item: (
+                int(item.get("train_index") or 10**9),
+                str(item.get("vehicle_id")),
+            ),
+        )
+        active_ids = {str(item["vehicle_id"]) for item in ordered_trains}
+        self._vehicle_runtime = {
+            vehicle_id: runtime
+            for vehicle_id, runtime in self._vehicle_runtime.items()
+            if vehicle_id in active_ids
+        }
+
+        ordered_runtime = []
+        for index, train in enumerate(ordered_trains, start=1):
+            vehicle_id = str(train["vehicle_id"])
+            runtime = self._vehicle_runtime.get(vehicle_id)
+            if runtime is None:
+                runtime = {
+                    "vehicle_id": vehicle_id,
+                    "train_index": int(train.get("train_index") or index),
+                    "line_id": str(train.get("line_id") or "LINE-1"),
+                    "position": float(train.get("position") or self._default_position(index)),
+                    "speed": 0.0,
+                    "energy_kwh": round(30.0 + index * 4.0, 2),
+                    "drive_mode": self._default_drive_mode(vehicle_id, train),
+                    "route_id": "R_BRANCH" if index % 3 == 0 else "R_MAIN",
+                }
+            else:
+                runtime["train_index"] = int(train.get("train_index") or runtime["train_index"])
+                runtime["line_id"] = str(train.get("line_id") or runtime["line_id"])
+                runtime["drive_mode"] = self._default_drive_mode(vehicle_id, train, runtime["drive_mode"])
+            self._vehicle_runtime[vehicle_id] = runtime
+            ordered_runtime.append(runtime)
+        return ordered_runtime
+
+    def _default_position(self, index: int) -> float:
+        return float((index - 1) * 950.0) % self.line_length
+
+    @staticmethod
+    def _default_drive_mode(vehicle_id: str, train: dict, fallback: str | None = None) -> str:
+        mode = str(train.get("mode") or fallback or "").lower()
+        if mode in {"manual", "ato"}:
+            return mode
+        return "manual" if vehicle_id == "TRAIN-001" else "ato"
 
     def _build_sections(self, train_positions: Dict[str, float]) -> List[dict]:
         sections = []

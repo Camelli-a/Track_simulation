@@ -422,10 +422,17 @@ class DashboardStateStore:
             if self._active_driver_vehicle_id not in active_ids:
                 self._active_driver_vehicle_id = sorted(active_ids)[0] if active_ids else None
 
-    def update_ma_limits(self, ma_limits: Iterable[Dict[str, Any]]) -> None:
+    def update_ma_limits(
+        self,
+        ma_limits: Iterable[Dict[str, Any]],
+        *,
+        replace_existing: bool = False,
+    ) -> None:
         now = time.time()
+        items = list(ma_limits)
         with self._lock:
-            for item in ma_limits:
+            next_ma_limits: Dict[str, MovementAuthoritySnapshot] = {}
+            for item in items:
                 raw_data = dict(item)
                 normalized_ma = normalize_ma(item)
                 vehicle_id = normalized_ma.get("vehicle_id")
@@ -441,7 +448,10 @@ class DashboardStateStore:
                 normalized_ma.setdefault("raw_data", raw_data)
                 self._apply_protocol_metadata(normalized_ma, raw_data, now, "ma")
                 ma_snapshot = MovementAuthoritySnapshot(**normalized_ma)
-                self._ma_limits[vehicle_id] = ma_snapshot
+                if replace_existing:
+                    next_ma_limits[vehicle_id] = ma_snapshot
+                else:
+                    self._ma_limits[vehicle_id] = ma_snapshot
                 train = self._trains.get(vehicle_id)
                 if train:
                     payload = train.model_dump()
@@ -452,47 +462,71 @@ class DashboardStateStore:
                     if ma_payload.get("distance_to_ma") is not None:
                         payload["stop_distance"] = max(0.0, float(ma_payload["distance_to_ma"]))
                     self._trains[vehicle_id] = TrainSnapshot(**payload)
+            if replace_existing:
+                self._ma_limits = next_ma_limits
 
     def update_signal_state(self, data: Dict[str, Any]) -> None:
         with self._lock:
             if data.get("system_mode"):
                 self._system_mode = str(data["system_mode"])
 
-            for section in data.get("sections", []):
-                raw_section = dict(section)
-                payload = normalize_section(section)
-                section_id = payload.get("section_id")
-                if not section_id:
-                    continue
-                payload["section_id"] = section_id
-                payload.setdefault("line_id", data.get("line_id", "LINE-1"))
-                payload.setdefault("occupied", False)
-                payload.setdefault("condition", "normal")
-                self._apply_protocol_metadata(payload, raw_section, time.time(), "section", parent=data)
-                existing = self._sections.get(section_id)
-                if existing:
-                    merged = existing.model_dump()
-                    merged.update({key: value for key, value in payload.items() if value is not None})
-                    payload = merged
-                self._sections[section_id] = TrackSectionSnapshot(**payload)
+            if "sections" in data:
+                next_sections: Dict[str, TrackSectionSnapshot] = {}
+                for section in data.get("sections", []):
+                    raw_section = dict(section)
+                    payload = normalize_section(section)
+                    section_id = payload.get("section_id")
+                    if not section_id:
+                        continue
+                    payload["section_id"] = section_id
+                    payload.setdefault("line_id", data.get("line_id", "LINE-1"))
+                    payload.setdefault("occupied", False)
+                    payload.setdefault("condition", "normal")
+                    self._apply_protocol_metadata(payload, raw_section, time.time(), "section", parent=data)
+                    existing = self._sections.get(section_id)
+                    if existing:
+                        merged = existing.model_dump()
+                        merged.update(payload)
+                        payload = merged
+                    next_sections[section_id] = TrackSectionSnapshot(**payload)
+                self._sections = next_sections
 
-            for signal in data.get("signals", data.get("lights", [])):
-                raw_signal = dict(signal)
-                payload = normalize_signal(signal)
-                signal_id = payload.get("signal_id")
-                if not signal_id:
-                    continue
-                self._apply_protocol_metadata(payload, raw_signal, time.time(), "signal", parent=data)
-                self._signals[signal_id] = SignalSnapshot(**payload)
+            signal_items = data.get("signals")
+            if signal_items is None and "lights" in data:
+                signal_items = data.get("lights", [])
+            if signal_items is not None:
+                next_signals: Dict[str, SignalSnapshot] = {}
+                for signal in signal_items:
+                    raw_signal = dict(signal)
+                    payload = normalize_signal(signal)
+                    signal_id = payload.get("signal_id")
+                    if not signal_id:
+                        continue
+                    self._apply_protocol_metadata(payload, raw_signal, time.time(), "signal", parent=data)
+                    existing = self._signals.get(signal_id)
+                    if existing:
+                        merged = existing.model_dump()
+                        merged.update(payload)
+                        payload = merged
+                    next_signals[signal_id] = SignalSnapshot(**payload)
+                self._signals = next_signals
 
-            for switch in data.get("switches", []):
-                raw_switch = dict(switch)
-                payload = normalize_switch(switch)
-                switch_id = payload.get("switch_id")
-                if not switch_id:
-                    continue
-                self._apply_protocol_metadata(payload, raw_switch, time.time(), "switch", parent=data)
-                self._switches[switch_id] = SwitchSnapshot(**payload)
+            if "switches" in data:
+                next_switches: Dict[str, SwitchSnapshot] = {}
+                for switch in data.get("switches", []):
+                    raw_switch = dict(switch)
+                    payload = normalize_switch(switch)
+                    switch_id = payload.get("switch_id")
+                    if not switch_id:
+                        continue
+                    self._apply_protocol_metadata(payload, raw_switch, time.time(), "switch", parent=data)
+                    existing = self._switches.get(switch_id)
+                    if existing:
+                        merged = existing.model_dump()
+                        merged.update(payload)
+                        payload = merged
+                    next_switches[switch_id] = SwitchSnapshot(**payload)
+                self._switches = next_switches
 
             self._route_results = [
                 RouteResult(**item) for item in data.get("route_results", [])

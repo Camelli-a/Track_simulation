@@ -43,8 +43,8 @@
           <strong class="app-side-stat-value">{{ modeLabel }}</strong>
         </div>
         <div class="app-side-stat">
-          <span class="app-side-stat-label">列车</span>
-          <strong class="app-side-stat-value">{{ sim.vehicles.length }}</strong>
+          <span class="app-side-stat-label">{{ vehicleCountLabel }}</span>
+          <strong class="app-side-stat-value">{{ vehicleCountValue }}</strong>
         </div>
       </div>
 
@@ -54,6 +54,7 @@
         <NavItem to="/cab" label="停车控制" icon="▣" hint="单车监督、制动曲线、ATO/ATP 与停车结果" />
         <NavItem to="/signal" label="信号与联锁" icon="⌘" hint="MA 约束摘要、前方约束链与联锁冲突" />
         <NavItem to="/fault" label="故障演示" icon="⟟" hint="异常触发、活动事件、影响摘要与演示动作" />
+        <NavItem to="/driver-desk-sim" label="司机台联调" icon="◍" hint="TCP 协议模拟、按钮手柄输入与灯光回写" />
       </nav>
 
       <div class="mt-auto space-y-3">
@@ -166,6 +167,17 @@ const modeLabel = computed(() => {
   if (sim.systemMode === 'degraded') return '降级运行'
   if (sim.systemMode === 'offline') return '离线待机'
   return '正常运行'
+})
+
+const vehicleCountLabel = computed(() =>
+  sim.vehicleManagementMode === 'full' ? '管理车辆' : '在线列车'
+)
+
+const vehicleCountValue = computed(() => {
+  if (sim.vehicleManagementMode === 'full') {
+    return sim.managedTrains.length
+  }
+  return sim.vehicles.length
 })
 
 const accessStatus = computed(() => {

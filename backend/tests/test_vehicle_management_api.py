@@ -11,7 +11,9 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from main import app  # noqa: E402
 from app.api.v1.endpoints import vehicle as vehicle_endpoint  # noqa: E402
+from app.data_flow.mock_service import mock_dashboard_service  # noqa: E402
 from app.data_flow.state_store import state_store  # noqa: E402
+from app.services.line_operation_service import LineTrainRuntime, PendingLineTrain  # noqa: E402
 from app.services.station_demo_service import StationDemoConfig, StationDemoService  # noqa: E402
 
 
@@ -38,7 +40,10 @@ def test_vehicle_manage_add_remove_clear_reset(monkeypatch):
         "stop_all",
         lambda: {"stopped": 0, "results": []},
     )
-    vehicle_endpoint.vehicle_manager.reset_trains(10)
+    vehicle_endpoint.vehicle_manager.reset_trains(2)
+    vehicle_endpoint.line_operation_service.active = False
+    vehicle_endpoint.line_operation_service._trains.clear()
+    vehicle_endpoint.line_operation_service._pending_trains.clear()
 
     client = TestClient(app)
 
@@ -46,36 +51,37 @@ def test_vehicle_manage_add_remove_clear_reset(monkeypatch):
         "/api/v1/vehicle/manage",
         json={
             "type": "add_train",
-            "vehicle_id": "TRAIN-011",
-            "train_index": 11,
+            "vehicle_id": "TRAIN-003",
+            "train_index": 3,
             "position": 1200.0,
         },
     )
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["result"]["vehicle_id"] == "TRAIN-011"
-    assert data["result"]["train_index"] == 11
-    assert data["result"]["control_policy"] == "non_001_added_to_onboard_ato_queue"
-    assert len(data["trains"]) == 11
+    assert data["result"]["vehicle_id"] == "TRAIN-003"
+    assert data["result"]["train_index"] == 3
+    assert "control_policy" not in data["result"]
+    assert len(data["trains"]) == 3
+    assert vehicle_endpoint.line_operation_service.active is False
     assert published[-1] == (
         "add_train",
         {
-            "vehicle_id": "TRAIN-011",
-            "train_index": 11,
+            "vehicle_id": "TRAIN-003",
+            "train_index": 3,
             "line_id": "LINE-1",
-            "position": 313.0,
+            "position": 1200.0,
         },
     )
 
     response = client.post(
         "/api/v1/vehicle/manage",
-        json={"type": "remove_train", "vehicle_id": "TRAIN-011"},
+        json={"type": "remove_train", "vehicle_id": "TRAIN-003"},
     )
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert all(item["vehicle_id"] != "TRAIN-011" for item in data["trains"])
+    assert all(item["vehicle_id"] != "TRAIN-003" for item in data["trains"])
 
     response = client.post("/api/v1/vehicle/manage", json={"type": "clear_trains"})
     assert response.status_code == 200
@@ -90,8 +96,8 @@ def test_vehicle_manage_add_remove_clear_reset(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["result"]["count"] == 5
-    assert len(data["trains"]) == 5
+    assert data["result"]["count"] == 3
+    assert len(data["trains"]) == 3
 
 
 def test_vehicle_manage_train_001_remains_manual_management(monkeypatch):
@@ -137,39 +143,66 @@ def test_vehicle_manage_train_001_remains_manual_management(monkeypatch):
 
 
 def test_vehicle_trains_endpoint_reports_default_count():
-    vehicle_endpoint.vehicle_manager.reset_trains(10)
+    vehicle_endpoint.vehicle_manager.reset_trains(3)
     response = TestClient(app).get("/api/v1/vehicle/trains")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["count"] == 10
+    assert data["count"] == 3
     assert data["trains"][0]["vehicle_id"] == "TRAIN-001"
 
 
-def test_vehicle_manage_allows_more_than_udp_slot_count(monkeypatch):
+def test_vehicle_manage_rejects_add_when_limit_reached(monkeypatch):
     monkeypatch.setattr(vehicle_endpoint, "publish_module_message", lambda topic, data: True)
     monkeypatch.setattr(
         vehicle_endpoint.vehicle_process_manager,
         "start_train",
         lambda **kwargs: {"enabled": True, "started": True, **kwargs},
     )
-    vehicle_endpoint.vehicle_manager.reset_trains(10)
+    vehicle_endpoint.vehicle_manager.reset_trains(3)
 
     response = TestClient(app).post(
         "/api/v1/vehicle/manage",
         json={
             "type": "add_train",
-            "vehicle_id": "TRAIN-021",
-            "train_index": 21,
+            "vehicle_id": "TRAIN-004",
+            "train_index": 4,
         },
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["ok"] is True
-    assert data["result"]["vehicle_id"] == "TRAIN-021"
-    assert data["result"]["train_index"] == 21
-    assert any(item["vehicle_id"] == "TRAIN-021" for item in data["trains"])
+    assert data["ok"] is False
+    assert data["result"]["reason"] == "train_limit_reached"
+    assert data["result"]["limit"] == 3
+    assert len(data["trains"]) == 3
+
+
+def test_vehicle_manage_rejects_manual_slot_above_supported_range(monkeypatch):
+    monkeypatch.setattr(vehicle_endpoint, "publish_module_message", lambda topic, data: True)
+    monkeypatch.setattr(
+        vehicle_endpoint.vehicle_process_manager,
+        "start_train",
+        lambda **kwargs: {"enabled": True, "started": True, **kwargs},
+    )
+    vehicle_endpoint.vehicle_manager.reset_trains(0)
+
+    response = TestClient(app).post(
+        "/api/v1/vehicle/manage",
+        json={
+            "type": "add_train",
+            "vehicle_id": "TRAIN-004",
+            "train_index": 4,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["result"]["reason"] == "train_index_out_of_supported_range"
+    assert data["result"]["limit"] == 3
+    assert data["result"]["train_index"] == 4
+    assert data["trains"] == []
 
 
 def test_vehicle_manage_remove_prunes_dashboard_snapshot(monkeypatch):
@@ -210,6 +243,74 @@ def test_vehicle_manage_remove_prunes_dashboard_snapshot(monkeypatch):
     )
     assert response.status_code == 200
     assert all(item.vehicle_id != "TRAIN-077" for item in state_store.get_snapshot().trains)
+
+
+def test_vehicle_manage_remove_by_slot_clears_line_operation_runtime(monkeypatch):
+    monkeypatch.setattr(vehicle_endpoint, "publish_module_message", lambda topic, data: True)
+    monkeypatch.setattr(
+        vehicle_endpoint.vehicle_process_manager,
+        "stop_train",
+        lambda vehicle_id: {"stopped": True, "vehicle_id": vehicle_id},
+    )
+
+    vehicle_endpoint.vehicle_manager.clear_trains()
+    vehicle_endpoint.vehicle_manager.add_train(vehicle_id="TRAIN-088", slot=88, position=8800.0)
+    vehicle_endpoint.line_operation_service._trains.clear()
+    vehicle_endpoint.line_operation_service._pending_trains.clear()
+    vehicle_endpoint.line_operation_service._trains["TRAIN-088"] = LineTrainRuntime(
+        vehicle_id="TRAIN-088",
+        train_index=88,
+        direction="up",
+        route_id="LINE-UP",
+        start_position_m=8800.0,
+        target_station_index=None,
+        created_at=time.time(),
+    )
+    vehicle_endpoint.line_operation_service._pending_trains.append(
+        PendingLineTrain(
+            vehicle_id="TRAIN-088",
+            train_index=88,
+            direction="up",
+            requested_at=time.time(),
+        )
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/vehicle/manage",
+        json={"type": "remove_train", "train_index": 88},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["result"]["vehicle_id"] == "TRAIN-088"
+    assert data["result"]["process"]["vehicle_id"] == "TRAIN-088"
+    assert "TRAIN-088" not in vehicle_endpoint.line_operation_service._trains
+    assert all(
+        item.train_index != 88
+        for item in vehicle_endpoint.line_operation_service._pending_trains
+    )
+
+
+def test_mock_dashboard_service_tracks_managed_vehicle_roster():
+    vehicle_endpoint.vehicle_manager.clear_trains()
+    state_store.replace_trains([], prune_absent=True)
+
+    vehicle_endpoint.vehicle_manager.add_train(vehicle_id="TRAIN-501", slot=501, position=120.0)
+    vehicle_endpoint.vehicle_manager.add_train(vehicle_id="TRAIN-502", slot=502, position=240.0)
+    mock_dashboard_service.tick()
+
+    snapshot = state_store.get_snapshot()
+    assert {item.vehicle_id for item in snapshot.trains} == {"TRAIN-501", "TRAIN-502"}
+
+    vehicle_endpoint.vehicle_manager.remove_train(vehicle_id="TRAIN-502")
+    mock_dashboard_service.tick()
+    snapshot = state_store.get_snapshot()
+    assert {item.vehicle_id for item in snapshot.trains} == {"TRAIN-501"}
+
+    vehicle_endpoint.vehicle_manager.clear_trains()
+    mock_dashboard_service.tick()
+    assert state_store.get_snapshot().trains == []
 
 
 def test_station_demo_start_status_stop(monkeypatch):

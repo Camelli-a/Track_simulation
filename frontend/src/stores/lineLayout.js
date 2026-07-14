@@ -731,7 +731,17 @@ function composeLayout({ localLayout = null, snapshot = null, yardLayout = null 
   }
 
   const blocks = backendSections.map(normalizeBlockFromSection)
-  const totalLength = Math.max(...blocks.map((block) => Number(block.end ?? 0)), localLayout?.total_length_m ?? 0, 5000)
+  const stationMaxPosition = Math.max(
+    ...(localLayout?.stations ?? [])
+      .map((station) => Number(station.position ?? station.position_m ?? 0))
+      .filter(Number.isFinite),
+    0,
+  )
+  const totalLength = Math.max(
+    Number(localLayout?.total_length_m ?? 0),
+    stationMaxPosition,
+    5000,
+  )
   const localStations = localLayout?.stations ?? []
   const stations = buildStationsFromBackend({
     sections: backendSections,

@@ -52,7 +52,7 @@
       <button
         type="button"
         class="rounded-xl border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100 transition hover:border-emerald-300/60 hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="store.managedTrainsLoading || !canManageVehicles"
+        :disabled="store.managedTrainsLoading || !canManageVehicles || hasReachedTrainLimit"
         @click="addNextTrain"
       >
         添加下一辆车
@@ -67,6 +67,10 @@
         删除当前关注车辆
       </button>
     </div>
+
+    <p class="mt-3 text-xs text-slate-500">
+      当前前端最多管理 3 辆车，并会尽量把 `TRAIN-001` 留到最后再删。
+    </p>
 
     <p v-if="store.managedTrainsError" class="mt-3 rounded-xl border border-red-900/50 bg-red-950/20 px-3 py-2 text-xs text-red-200">
       {{ store.managedTrainsError }}
@@ -86,8 +90,10 @@ import { useUiStore } from '@/stores/ui'
 
 const store = useSimulationStore()
 const ui = useUiStore()
+const MAX_MANAGED_TRAINS = 3
 
 const canManageVehicles = computed(() => store.vehicleManagementMode === 'full')
+const hasReachedTrainLimit = computed(() => store.managedTrains.length >= MAX_MANAGED_TRAINS)
 
 const focusedVehicleId = computed(() => store.selectedVehicleId ?? store.selectedVehicle?.vehicle_id ?? null)
 
@@ -105,17 +111,23 @@ const managementModeText = computed(() => {
 })
 
 const nextTrainIndex = computed(() => {
+  if (hasReachedTrainLimit.value) return null
   const used = new Set(
     [...store.managedTrains, ...store.vehicles]
       .map((train) => Number(train.train_index ?? parseTrainIndex(train.vehicle_id)))
       .filter(Number.isFinite),
   )
-  let index = 1
-  while (used.has(index)) index += 1
-  return index
+  for (let index = 1; index <= MAX_MANAGED_TRAINS; index += 1) {
+    if (!used.has(index)) return index
+  }
+  return null
 })
 
-const nextVehicleId = computed(() => `TRAIN-${String(nextTrainIndex.value).padStart(3, '0')}`)
+const nextVehicleId = computed(() =>
+  nextTrainIndex.value == null
+    ? `已满 ${MAX_MANAGED_TRAINS}/${MAX_MANAGED_TRAINS}`
+    : `TRAIN-${String(nextTrainIndex.value).padStart(3, '0')}`
+)
 
 onMounted(() => {
   store.hydrateManagedTrains({ silent: true }).catch(() => {})
@@ -128,6 +140,10 @@ async function refreshManagedTrains() {
 async function addNextTrain() {
   if (!canManageVehicles.value) {
     showMissingManageEndpoint()
+    return
+  }
+  if (hasReachedTrainLimit.value || nextTrainIndex.value == null) {
+    showTrainLimitToast()
     return
   }
   const payload = {
@@ -149,7 +165,7 @@ function requestRemoveFocusedTrain() {
     showMissingManageEndpoint()
     return
   }
-  const vehicleId = focusedVehicleId.value
+  const vehicleId = resolvePreferredRemovalVehicleId()
   if (!vehicleId) return
 
   ui.requestConfirm({
@@ -161,14 +177,29 @@ function requestRemoveFocusedTrain() {
     onConfirm: async () => {
       const response = await store.submitVehicleManage({ type: 'remove_train', vehicle_id: vehicleId })
       if (response?.ok) {
-        const nextId = store.vehicles.find((vehicle) => vehicle.vehicle_id !== vehicleId)?.vehicle_id
-          ?? store.managedTrains.find((train) => train.vehicle_id !== vehicleId)?.vehicle_id
-          ?? null
+        const nextId = resolvePreferredRemainingVehicleId(vehicleId)
         store.selectVehicle(nextId)
         await store.hydrateManagedTrains({ silent: true }).catch(() => {})
       }
     },
   })
+}
+
+function resolvePreferredRemovalVehicleId() {
+  const focusedId = focusedVehicleId.value
+  if (focusedId && focusedId !== 'TRAIN-001') return focusedId
+  return resolvePreferredRemainingVehicleId(null) ?? focusedId ?? null
+}
+
+function resolvePreferredRemainingVehicleId(excludedVehicleId = null) {
+  const ids = [...new Set(
+    [...store.managedTrains, ...store.vehicles]
+      .map((train) => train.vehicle_id)
+      .filter(Boolean),
+  )]
+  return ids.find((id) => id !== excludedVehicleId && id !== 'TRAIN-001')
+    ?? ids.find((id) => id !== excludedVehicleId)
+    ?? null
 }
 
 function showMissingManageEndpoint() {
@@ -177,6 +208,15 @@ function showMissingManageEndpoint() {
     title: '车辆管理接口不可用',
     message: '当前后端没有进入完整车辆管理模式，暂时不能在前端增删车辆。',
     duration: 3600,
+  })
+}
+
+function showTrainLimitToast() {
+  ui.showToast({
+    type: 'warning',
+    title: '车辆数量已达上限',
+    message: `当前最多管理 ${MAX_MANAGED_TRAINS} 辆车`,
+    duration: 2800,
   })
 }
 

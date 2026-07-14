@@ -189,12 +189,39 @@ class LineOperationService:
             "reason": "endpoint_not_clear_waiting_for_ato_queue",
         }
 
-    def forget_train(self, vehicle_id: str) -> None:
-        self._trains.pop(str(vehicle_id), None)
+    def forget_train(
+        self,
+        vehicle_id: str | None = None,
+        train_index: int | None = None,
+    ) -> None:
+        vehicle_id = str(vehicle_id) if vehicle_id is not None else None
+        train_index = int(train_index) if train_index is not None else None
+
+        remove_ids = set()
+        if vehicle_id is not None:
+            remove_ids.add(vehicle_id)
+        if train_index is not None:
+            remove_ids.update(
+                runtime.vehicle_id
+                for runtime in self._trains.values()
+                if runtime.train_index == train_index
+            )
+            remove_ids.update(
+                item.vehicle_id
+                for item in self._pending_trains
+                if item.vehicle_id is not None and item.train_index == train_index
+            )
+
+        for item_vehicle_id in remove_ids:
+            self._trains.pop(item_vehicle_id, None)
+
         self._pending_trains = [
             item
             for item in self._pending_trains
-            if item.vehicle_id != str(vehicle_id)
+            if not (
+                (vehicle_id is not None and item.vehicle_id == vehicle_id)
+                or (train_index is not None and item.train_index == train_index)
+            )
         ]
 
     async def _run_loop(self) -> None:
