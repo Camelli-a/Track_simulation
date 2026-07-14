@@ -72,6 +72,13 @@ def test_comm_age_triggers_emergency_after_configured_timeout():
     assert emergency.reason == "communication_lost"
 
 
+def test_train_uses_demo_tolerant_comm_timeouts_from_settings():
+    train, _ = _train_and_router()
+
+    assert train.comm_warning_timeout_sec == pytest.approx(1.5)
+    assert train.comm_timeout_sec == pytest.approx(5.0)
+
+
 def test_router_comm_state_updates_connection_and_timestamp_for_atp():
     train, router = _train_and_router()
     timestamp = time.time()

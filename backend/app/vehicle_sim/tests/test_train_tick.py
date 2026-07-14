@@ -141,9 +141,28 @@ def test_train_ma_helpers_validate_derive_distance_and_merge_track_limit():
 
     assert train.has_valid_ma(now) is True
     assert train.get_distance_to_ma_m(now) == 400.0
-    assert train.get_effective_speed_limit_kmh(now) == pytest.approx(
-        min(50.0, train.track.get_speed_limit(100.0))
+    assert train.track.get_speed_limit(100.0) == pytest.approx(47.988)
+    assert train.allowed_speed_kmh == pytest.approx(90.0)
+    assert train.get_effective_speed_limit_kmh(now) == pytest.approx(90.0)
+
+
+def test_demo_fixed_atp_limit_does_not_override_fault_or_braking_limits():
+    train = _train()
+    train.apply_ma_state(
+        MaLimit(
+            vehicle_id="TRAIN-001",
+            ma_limit=500.0,
+            target_speed=25.0,
+            reason="test",
+            allowed_speed_kmh=25.0,
+            target_distance_m=100.0,
+            permission="restricted",
+            signal_state="yellow",
+            speed_limit_reason="braking_curve",
+        )
     )
+
+    assert train.allowed_speed_kmh == pytest.approx(25.0)
 
 
 def test_expired_ma_is_invalid_and_blocks_am_traction():

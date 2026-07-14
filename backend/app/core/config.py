@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     SIGNAL_COORD_OFFSET_M: float = 216.46
     VIEWER_ABS_OFFSET_M: float = 4028.28
 
+    # ATP driver-console/ZMQ health supervision for hardware demo runs.
+    # The low-level ATP function still supports sub-second thresholds in unit
+    # tests; vehicle processes use these defaults to tolerate short PLC/ZMQ
+    # jitter during station dwell and door operations.
+    ATP_COMM_WARNING_TIMEOUT_SEC: float = 1.5
+    ATP_COMM_EMERGENCY_TIMEOUT_SEC: float = 5.0
+    ATP_FIXED_SPEED_LIMIT_KMH: float = 90.0
+
     class Config:
         env_file = ".env"
 

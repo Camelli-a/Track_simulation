@@ -57,7 +57,7 @@ def test_step_tick_am_uses_train_ato_controller_command():
     assert train.state.mode == "ato"
 
 
-def test_step_tick_am_ato_uses_track_speed_limit_before_atp_emergency():
+def test_step_tick_am_ato_uses_fixed_demo_atp_limit_instead_of_local_track_limit():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")
     train.state.position = 1760.0
@@ -72,9 +72,10 @@ def test_step_tick_am_ato_uses_track_speed_limit_before_atp_emergency():
 
     assert train.last_ato_output is not None
     assert train.track.get_speed_limit(1760.0) == pytest.approx(34.992)
-    assert train.last_ato_output.safe_speed_limit_kmh == pytest.approx(34.992)
-    assert train.commanded_traction_level == 0
-    assert train.commanded_brake_level > 0
+    assert train.allowed_speed_kmh == pytest.approx(90.0)
+    assert train.last_ato_output.safe_speed_limit_kmh == pytest.approx(90.0)
+    assert train.commanded_traction_level > 0
+    assert train.commanded_brake_level == 0
     assert train.atp_intervened is False
     assert train.state.emergency_brake is False
 

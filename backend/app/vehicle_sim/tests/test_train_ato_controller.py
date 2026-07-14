@@ -155,7 +155,8 @@ def test_low_speed_target_decreases_with_distance():
 
     assert controller.compute_low_speed_target_ms(10.0) > controller.compute_low_speed_target_ms(3.0)
     assert controller.compute_low_speed_target_ms(3.0) <= controller.CRAWL_SPEED_MS
-    assert controller.compute_low_speed_target_ms(0.3) == 0.0
+    assert controller.compute_low_speed_target_ms(0.3) > 0.0
+    assert controller.compute_low_speed_target_ms(0.05) == 0.0
     assert controller.compute_low_speed_target_ms(-0.1) == 0.0
 
 
@@ -551,11 +552,48 @@ def test_am_creep_brakes_when_current_speed_exceeds_low_speed_target():
     assert output.commanded_traction_level == 0
 
 
+def test_low_speed_target_uses_faster_creep_before_precision_zone():
+    controller = _controller()
+
+    approach_speed = controller.compute_low_speed_target_ms(3.0)
+    precision_speed = controller.compute_low_speed_target_ms(1.0)
+
+    assert approach_speed == pytest.approx(controller.CRAWL_SPEED_MS)
+    assert precision_speed < approach_speed
+    assert precision_speed <= controller.PRECISION_CRAWL_SPEED_MS
+
+
+def test_am_precision_zone_brakes_before_overshooting_stop_target():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(position_m=1499.6, speed_ms=0.2, stop_target_m=1500.0)
+    )
+
+    assert output.ato_state == "creep"
+    assert output.ato_target_speed_kmh <= controller.MIN_CREEP_SPEED_MS * 3.6 + 0.001
+    assert output.commanded_traction_level == 0
+    assert output.commanded_brake_level >= 3
+
+
+def test_am_stopped_short_creeps_to_target_instead_of_holding():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(position_m=1499.7, speed_ms=0.0, stop_target_m=1500.0)
+    )
+
+    assert output.ato_state == "creep"
+    assert output.commanded_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_brake_level == 0
+    assert output.holding_brake is False
+
+
 def test_am_holds_inside_stop_window_at_low_speed():
     controller = _controller()
 
     output = controller.compute_am_command(
-        _am_input(position_m=1499.7, speed_ms=0.1, stop_target_m=1500.0)
+        _am_input(position_m=1499.95, speed_ms=0.05, stop_target_m=1500.0)
     )
 
     assert output.ato_state == "holding"
@@ -571,8 +609,8 @@ def test_holding_bypasses_jerk_limit():
 
     output = controller.compute_am_command(
         _am_input(
-            position_m=1499.7,
-            speed_ms=0.1,
+            position_m=1499.95,
+            speed_ms=0.05,
             stop_target_m=1500.0,
             previous_commanded_brake_level=0,
             jerk_limit_enabled=True,
@@ -589,8 +627,8 @@ def test_holding_is_not_weakened_by_brake_bias():
 
     output = controller.compute_am_command(
         _am_input(
-            position_m=1499.7,
-            speed_ms=0.1,
+            position_m=1499.95,
+            speed_ms=0.05,
             stop_target_m=1500.0,
             brake_bias=0.7,
             brake_bias_enabled=True,

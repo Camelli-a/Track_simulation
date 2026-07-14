@@ -74,13 +74,10 @@ def test_curve_point_ma_safety_boundary_fields():
 
     curve_point = train._build_curve_point()
 
-    assert curve_point["allowed_speed_kmh"] == pytest.approx(
-        train.track.get_speed_limit(100.0)
-    )
+    assert train.track.get_speed_limit(100.0) == pytest.approx(47.988)
+    assert curve_point["allowed_speed_kmh"] == pytest.approx(80.0)
     assert curve_point["ma_allowed_speed_kmh"] == 80.0
-    assert curve_point["track_speed_limit_kmh"] == pytest.approx(
-        train.track.get_speed_limit(100.0)
-    )
+    assert curve_point["track_speed_limit_kmh"] == pytest.approx(90.0)
     assert curve_point["eb_trigger_speed_kmh"] == 90.0
     assert curve_point["ma_limit_m"] == 500.0
     assert curve_point["distance_to_ma_m"] == 400.0

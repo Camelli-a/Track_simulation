@@ -80,13 +80,16 @@ class StopResult:
 class TrainAtoController:
     MAX_LEVEL = 4
     STOP_WINDOW_M = 0.5
-    CREEP_DISTANCE_M = 5.0
-    HOLD_DISTANCE_M = 0.35
-    HOLD_SPEED_MS = 0.15
-    CRAWL_SPEED_MS = 0.5
+    CREEP_DISTANCE_M = 4.0
+    PRECISION_CREEP_DISTANCE_M = 1.5
+    HOLD_DISTANCE_M = 0.45
+    TARGET_ALIGNMENT_DISTANCE_M = 0.10
+    HOLD_SPEED_MS = 0.12
+    CRAWL_SPEED_MS = 0.55
+    PRECISION_CRAWL_SPEED_MS = 0.28
     POSITION_CONTROL_DISTANCE_M = 12.0
-    POSITION_KP = 0.28
-    MIN_CREEP_SPEED_MS = 0.12
+    POSITION_KP = 0.22
+    MIN_CREEP_SPEED_MS = 0.10
     LOW_SPEED_DEADBAND_MS = 0.08
     STATIC_CREEP_START_SPEED_MS = 0.05
     STATIC_CREEP_TRACTION_LEVEL = 2
@@ -236,13 +239,18 @@ class TrainAtoController:
 
     def compute_low_speed_target_ms(self, distance_to_stop_m: float) -> float:
         distance_to_stop_m = float(distance_to_stop_m)
-        if distance_to_stop_m <= self.HOLD_DISTANCE_M:
+        if distance_to_stop_m <= self.TARGET_ALIGNMENT_DISTANCE_M:
             return 0.0
 
         target_speed_ms = self.POSITION_KP * distance_to_stop_m
         if distance_to_stop_m <= self.CREEP_DISTANCE_M:
+            max_creep_speed_ms = (
+                self.PRECISION_CRAWL_SPEED_MS
+                if distance_to_stop_m <= self.PRECISION_CREEP_DISTANCE_M
+                else self.CRAWL_SPEED_MS
+            )
             return min(
-                self.CRAWL_SPEED_MS,
+                max_creep_speed_ms,
                 max(self.MIN_CREEP_SPEED_MS, target_speed_ms),
             )
 
@@ -405,7 +413,7 @@ class TrainAtoController:
 
         if (
             stop_target_is_safe
-            and abs(distance_to_stop_m) <= self.HOLD_DISTANCE_M
+            and abs(distance_to_stop_m) <= self.TARGET_ALIGNMENT_DISTANCE_M
             and control_speed_ms <= self.HOLD_SPEED_MS
         ):
             return self._build_output(
@@ -809,6 +817,13 @@ class TrainAtoController:
         target_speed_ms: float,
         distance_to_stop_m: float | None = None,
     ) -> tuple[int, int]:
+        if (
+            distance_to_stop_m is not None
+            and 0.0 <= distance_to_stop_m <= self.HOLD_DISTANCE_M
+            and current_speed_ms > self.HOLD_SPEED_MS
+        ):
+            return 0, 3
+
         speed_error_ms = current_speed_ms - target_speed_ms
         if speed_error_ms > 0.8:
             return 0, 4
@@ -821,7 +836,9 @@ class TrainAtoController:
 
         if (
             distance_to_stop_m is not None
-            and self.HOLD_DISTANCE_M < distance_to_stop_m <= self.CREEP_DISTANCE_M
+            and self.TARGET_ALIGNMENT_DISTANCE_M
+            < distance_to_stop_m
+            <= self.CREEP_DISTANCE_M
             and current_speed_ms <= self.STATIC_CREEP_START_SPEED_MS
         ):
             return self.STATIC_CREEP_TRACTION_LEVEL, 0

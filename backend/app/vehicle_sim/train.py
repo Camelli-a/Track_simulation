@@ -1,6 +1,8 @@
 import math
 import time
 
+from app.core.config import settings
+
 from .adapters.command_mapping import command_percent_to_levels
 from .adapters.id_mapping import vehicle_id_to_index
 from .adapters.driver_plc_mapping import (
@@ -15,7 +17,7 @@ from .atp import (
 )
 from .controllers.train_ato_controller import AtoControlInput, TrainAtoController
 from .dynamics import update_dynamics
-from .door_state import DoorState, normalize_door_mode, sides_for_mode
+from .door_state import DoorState, normalize_door_mode
 from .ma_validation import MaValidationResult, effective_allowed_speed, validate_ma
 from .models import AtoCommand, CommState, DriverInput, MaLimit, PowerState, TrainState
 from .track_map import TrackMap
@@ -68,8 +70,26 @@ class Train:
         self.power_factor = 1.0
         self.comm_ok = True
         self.last_comm_message_at = None
-        self.comm_warning_timeout_sec = DRIVER_WARNING_TIMEOUT_SEC
-        self.comm_timeout_sec = DRIVER_EMERGENCY_TIMEOUT_SEC
+        self.comm_warning_timeout_sec = max(
+            0.0,
+            float(
+                getattr(
+                    settings,
+                    "ATP_COMM_WARNING_TIMEOUT_SEC",
+                    DRIVER_WARNING_TIMEOUT_SEC,
+                )
+            ),
+        )
+        self.comm_timeout_sec = max(
+            self.comm_warning_timeout_sec,
+            float(
+                getattr(
+                    settings,
+                    "ATP_COMM_EMERGENCY_TIMEOUT_SEC",
+                    DRIVER_EMERGENCY_TIMEOUT_SEC,
+                )
+            ),
+        )
         self.last_alarm = None
         self.last_atp_decision = None
         self.last_atp_alarm_reason = None
@@ -167,9 +187,13 @@ class Train:
         self.close_right_door_requested = False
         self.door_dwell_sec = 5.0
         self.door_stop_speed_ms = 0.05
-        self.door_stop_tolerance_m = self.train_ato_controller.HOLD_DISTANCE_M
+        self.door_stop_tolerance_m = (
+            self.train_ato_controller.TARGET_ALIGNMENT_DISTANCE_M
+        )
         self.station_stop_acceptance_tolerance_m = 3.0
         self.door_rearm_distance_m = 2.0
+        self.station_dwell_target_m = None
+        self.station_dwell_remaining_s = 0.0
         self.fallback_ato = None
         self.next_stop_target_m = None
         self.completed_stop_target_keys: set[float] = set()
@@ -212,7 +236,7 @@ class Train:
     def apply_ma_state(self, ma_limit: MaLimit):
         if ma_limit.vehicle_id == self.state.vehicle_id:
             self.ma_limit = ma_limit.ma_limit
-            self.allowed_speed_kmh = ma_limit.allowed_speed_kmh
+            self.allowed_speed_kmh = self._demo_adjusted_ma_speed_limit(ma_limit)
             self.eb_trigger_speed_kmh = ma_limit.eb_trigger_speed_kmh
             self.target_speed_kmh = ma_limit.target_speed
             self.target_distance_m = ma_limit.target_distance_m
@@ -294,8 +318,16 @@ class Train:
         if key is None:
             return
         self.completed_stop_target_keys.add(key)
+        if self._stop_target_key(self.stop_target_m) == key:
+            self.stop_target_m = None
+            self.distance_to_stop_m = None
+        if self._stop_target_key(self.door_state.last_auto_target_m) == key:
+            self.door_state.last_auto_target_m = None
         if self._stop_target_key(self.next_stop_target_m) == key:
             self.next_stop_target_m = None
+        if self._stop_target_key(self.station_dwell_target_m) == key:
+            self.station_dwell_target_m = None
+            self.station_dwell_remaining_s = 0.0
         next_target = self._find_next_track_stop_m(self.state.position)
         if next_target is not None:
             self.next_stop_target_m = next_target
@@ -361,8 +393,40 @@ class Train:
         external_limit = self._effective_external_allowed_speed()
         return effective_allowed_speed(
             result.allowed_speed_kmh if external_limit is None else external_limit,
-            self.track.get_speed_limit(self.state.position),
+            self._track_speed_limit_kmh(self.state.position),
         )
+
+    def _fixed_atp_speed_limit_kmh(self) -> float | None:
+        try:
+            fixed_limit = float(getattr(settings, "ATP_FIXED_SPEED_LIMIT_KMH", 0.0))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(fixed_limit) or fixed_limit <= 0.0:
+            return None
+        return fixed_limit
+
+    def _track_speed_limit_kmh(self, position_m: float | None = None) -> float:
+        fixed_limit = self._fixed_atp_speed_limit_kmh()
+        if fixed_limit is not None:
+            return fixed_limit
+        position = self.state.position if position_m is None else float(position_m)
+        return self.track.get_speed_limit(position)
+
+    def _demo_adjusted_ma_speed_limit(self, ma_limit: MaLimit) -> float | None:
+        fixed_limit = self._fixed_atp_speed_limit_kmh()
+        if fixed_limit is None:
+            return ma_limit.allowed_speed_kmh
+        permission = str(ma_limit.permission or "").strip().lower()
+        signal_state = str(ma_limit.signal_state or "").strip().lower()
+        reason = str(ma_limit.speed_limit_reason or "").strip().lower()
+        running_limit_reasons = {"", "route_limit", "static_limit", "static_limit_preview"}
+        if (
+            permission in {"allow", ""}
+            and signal_state in {"green", ""}
+            and reason in running_limit_reasons
+        ):
+            return fixed_limit
+        return ma_limit.allowed_speed_kmh
 
     def apply_power_state(self, power: PowerState):
         self.power_fault = power.is_fault or power.voltage < 1000.0
@@ -826,10 +890,11 @@ class Train:
         self.traction_aux_reset_requested = False
         self.parking_release_requested = False
 
-    def _update_doors(self, dt: float) -> None:
-        """Apply door requests and automatic station dwell without integrating motion."""
-        stopped = self.state.speed_ms <= self.door_stop_speed_ms
-        stop_target_m = self._resolve_stop_target_m()
+    def _is_at_station_stop_target(self, stop_target_m: float | None) -> bool:
+        if stop_target_m is None:
+            return False
+        if self.state.speed_ms > self.door_stop_speed_ms:
+            return False
         station_tolerance_m = max(
             self.door_stop_tolerance_m,
             getattr(
@@ -838,13 +903,51 @@ class Train:
                 self.door_stop_tolerance_m,
             ),
         )
-        at_stop_target = (
+        distance_to_stop_m = self._signed_distance_m(stop_target_m)
+        if distance_to_stop_m is None:
+            return False
+        undershoot_in_hold_window = 0.0 <= distance_to_stop_m <= self.door_stop_tolerance_m
+        overshoot_in_acceptance_window = -station_tolerance_m <= distance_to_stop_m < 0.0
+        return undershoot_in_hold_window or overshoot_in_acceptance_window
+
+    def _update_station_dwell(self, dt: float) -> None:
+        """Complete station stops by dwell timer, independent of door open/close state."""
+        if self.station_dwell_target_m is not None:
+            if self._is_completed_stop_target(self.station_dwell_target_m):
+                self.station_dwell_target_m = None
+                self.station_dwell_remaining_s = 0.0
+                return
+            if not self._is_at_station_stop_target(self.station_dwell_target_m):
+                self.station_dwell_target_m = None
+                self.station_dwell_remaining_s = 0.0
+                return
+            self.station_dwell_remaining_s = max(
+                0.0,
+                self.station_dwell_remaining_s - max(0.0, float(dt)),
+            )
+            if self.station_dwell_remaining_s == 0.0:
+                self._complete_station_stop(self.station_dwell_target_m)
+            return
+
+        stop_target_m = self._resolve_stop_target_m()
+        if (
             stop_target_m is not None
-            and abs(self.state.position - stop_target_m) <= station_tolerance_m
-        )
+            and not self._is_completed_stop_target(stop_target_m)
+            and self._is_at_station_stop_target(stop_target_m)
+        ):
+            self.station_dwell_target_m = stop_target_m
+            self.station_dwell_remaining_s = max(0.0, float(self.door_dwell_sec))
+            if self.station_dwell_remaining_s == 0.0:
+                self._complete_station_stop(stop_target_m)
+
+    def _update_doors(self, dt: float) -> None:
+        """Apply explicit door requests; station dwell no longer depends on doors."""
+        self._update_station_dwell(dt)
+        stopped = self.state.speed_ms <= self.door_stop_speed_ms
 
         if (
-            self.door_state.last_auto_target_m is not None
+            self.door_state.all_closed
+            and self.door_state.last_auto_target_m is not None
             and abs(self.state.position - self.door_state.last_auto_target_m)
             > self.door_rearm_distance_m
         ):
@@ -865,15 +968,6 @@ class Train:
                 right=self.open_right_door_requested,
                 dwell_s=self.door_dwell_sec,
             )
-        elif (
-            self.door_state.all_closed
-            and stopped
-            and at_stop_target
-            and self.door_state.last_auto_target_m != stop_target_m
-        ):
-            left, right = sides_for_mode(self.door_state.mode)
-            self.door_state.open(left=left, right=right, dwell_s=self.door_dwell_sec)
-            self.door_state.last_auto_target_m = stop_target_m
         else:
             closed_after_dwell = self.door_state.tick(dt)
             if closed_after_dwell:
@@ -987,7 +1081,7 @@ class Train:
 
     def _build_atp_debug(self) -> dict:
         decision = self.last_atp_decision
-        track_speed_limit = self.track.get_speed_limit(self.state.position)
+        track_speed_limit = self._track_speed_limit_kmh(self.state.position)
         ma_allowed_speed = self.allowed_speed_kmh
         external_speed_limit = self.external_speed_limit_kmh
         forced_stop = self.signal_state == "red" or self.permission in {
@@ -1064,7 +1158,12 @@ class Train:
             return "signal_stop"
         candidates = []
         if track_speed_limit is not None:
-            candidates.append(("track_map", float(track_speed_limit)))
+            track_source = (
+                "fixed_atp_limit"
+                if self._fixed_atp_speed_limit_kmh() is not None
+                else "track_map"
+            )
+            candidates.append((track_source, float(track_speed_limit)))
         if ma_allowed_speed is not None:
             candidates.append(("ma_state", float(ma_allowed_speed)))
         if external_speed_limit is not None:
@@ -1155,7 +1254,7 @@ class Train:
             self.state.mode = "ato"
 
     def _step(self, traction_level: int, brake_level: int, dt: float):
-        speed_limit = self.track.get_speed_limit(self.state.position)
+        speed_limit = self._track_speed_limit_kmh(self.state.position)
         allowed_speed_kmh = self._effective_external_allowed_speed()
         eb_trigger_speed_kmh = self.eb_trigger_speed_kmh
         if self.signal_state == "red" or self.permission in {"stop", "deny", "blocked"}:
@@ -1436,7 +1535,7 @@ class Train:
         if recommended_speed_kmh is None:
             recommended_speed_kmh = getattr(self, "recommended_speed", None)
 
-        track_speed_limit_kmh = self.track.get_speed_limit(self.state.position)
+        track_speed_limit_kmh = self._track_speed_limit_kmh(self.state.position)
         effective_allowed_speed_kmh = None
         external_allowed_speed_kmh = self._effective_external_allowed_speed()
         if external_allowed_speed_kmh is not None:
