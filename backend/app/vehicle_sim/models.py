@@ -58,6 +58,9 @@ class TrainState:
     control_source: str = "none"
     ato_active: bool = False
     ato_capable: bool = False
+    ato_start_requested: bool = False
+    ato_start_accepted: bool = False
+    ato_start_reject_reason: Optional[str] = None
     auto_reverse_cap: bool = False
     auto_reverse_active: bool = False
     recommended_speed_kmh: Optional[float] = None
@@ -77,6 +80,18 @@ class TrainState:
     parking_brake: bool = False
     external_speed_limit_kmh: Optional[float] = None
     active_faults: tuple[str, ...] = ()
+    atp_supervision_state: str = "unknown"
+    atp_reason: str = "not_evaluated"
+    atp_allowed_speed_kmh: Optional[float] = None
+    atp_speed_limit_source: Optional[str] = None
+    atp_track_speed_limit_kmh: Optional[float] = None
+    atp_ma_allowed_speed_kmh: Optional[float] = None
+    atp_external_speed_limit_kmh: Optional[float] = None
+    atp_eb_trigger_speed_kmh: Optional[float] = None
+    atp_distance_to_authority_m: Optional[float] = None
+    atp_service_stop_distance_m: Optional[float] = None
+    atp_emergency_stop_distance_m: Optional[float] = None
+    atp_debug: Optional[dict] = None
     ato_brake_bias: float = 1.0
     ato_brake_bias_enabled: bool = False
     ato_brake_bias_adaptation_enabled: bool = False
@@ -172,6 +187,9 @@ class TrainState:
             "control_source": self.control_source,
             "ato_active": self.ato_active,
             "ato_capable": self.ato_capable,
+            "ato_start_requested": self.ato_start_requested,
+            "ato_start_accepted": self.ato_start_accepted,
+            "ato_start_reject_reason": self.ato_start_reject_reason,
             "auto_reverse_cap": self.auto_reverse_cap,
             "auto_reverse_active": self.auto_reverse_active,
             "recommended_speed_kmh": self.recommended_speed_kmh,
@@ -216,6 +234,50 @@ class TrainState:
             "parking_brake": self.parking_brake,
             "external_speed_limit_kmh": self.external_speed_limit_kmh,
             "active_faults": list(self.active_faults),
+            "atp_supervision_state": self.atp_supervision_state,
+            "atp_reason": self.atp_reason,
+            "atp_allowed_speed_kmh": (
+                None
+                if self.atp_allowed_speed_kmh is None
+                else round(self.atp_allowed_speed_kmh, 3)
+            ),
+            "atp_speed_limit_source": self.atp_speed_limit_source,
+            "atp_track_speed_limit_kmh": (
+                None
+                if self.atp_track_speed_limit_kmh is None
+                else round(self.atp_track_speed_limit_kmh, 3)
+            ),
+            "atp_ma_allowed_speed_kmh": (
+                None
+                if self.atp_ma_allowed_speed_kmh is None
+                else round(self.atp_ma_allowed_speed_kmh, 3)
+            ),
+            "atp_external_speed_limit_kmh": (
+                None
+                if self.atp_external_speed_limit_kmh is None
+                else round(self.atp_external_speed_limit_kmh, 3)
+            ),
+            "atp_eb_trigger_speed_kmh": (
+                None
+                if self.atp_eb_trigger_speed_kmh is None
+                else round(self.atp_eb_trigger_speed_kmh, 3)
+            ),
+            "atp_distance_to_authority_m": (
+                None
+                if self.atp_distance_to_authority_m is None
+                else round(self.atp_distance_to_authority_m, 3)
+            ),
+            "atp_service_stop_distance_m": (
+                None
+                if self.atp_service_stop_distance_m is None
+                else round(self.atp_service_stop_distance_m, 3)
+            ),
+            "atp_emergency_stop_distance_m": (
+                None
+                if self.atp_emergency_stop_distance_m is None
+                else round(self.atp_emergency_stop_distance_m, 3)
+            ),
+            "atp_debug": self.atp_debug,
             "ato_brake_bias": round(self.ato_brake_bias, 3),
             "ato_brake_bias_enabled": self.ato_brake_bias_enabled,
             "ato_brake_bias_adaptation_enabled": (

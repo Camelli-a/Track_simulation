@@ -87,3 +87,23 @@ def test_signal_ma_uses_flattened_static_limit_at_2035m():
     assert ma_limit["speed_limit_warning"] is False
     assert ma_limit["static_speed_limit"] == pytest.approx(35.0)
     assert ma_limit["speed_limit"] == pytest.approx(35.0)
+
+
+def test_single_train_main_route_ma_extends_beyond_demo_2500m_boundary():
+    snapshot = calculate_signal_snapshot(
+        [
+            {
+                "vehicle_id": "TRAIN-001",
+                "position": 2468.647,
+                "speed": 0.0,
+                "route_id": "R_MAIN",
+            }
+        ]
+    )
+
+    ma_limit = snapshot["ma_limits"][0]
+
+    assert ma_limit["reason"] == "route_end"
+    assert ma_limit["ma_limit"] > 10000.0
+    assert ma_limit["distance_to_ma"] > 7000.0
+    assert ma_limit["speed_limit_reason"] != "braking_curve"

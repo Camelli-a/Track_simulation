@@ -751,6 +751,12 @@ class TrainAtoController:
             return 0, 1
 
         underspeed_kmh = target_speed_kmh - current_speed_kmh
+        if (
+            current_speed_kmh <= 0.3
+            and target_speed_kmh > 1.0
+            and underspeed_kmh > 0.5
+        ):
+            return self.STATIC_CREEP_TRACTION_LEVEL, 0
         if underspeed_kmh > 3.0 and target_speed_kmh > 1.0:
             if underspeed_kmh > 25.0:
                 traction_level = 4
@@ -785,7 +791,8 @@ class TrainAtoController:
             return 0, max(brake_level, 2)
         if overspeed_kmh > -1.0:
             return 0, max(brake_level, 1)
-        if current_speed_kmh >= safe_speed_limit_kmh - 5.0:
+        hold_margin_kmh = min(5.0, max(0.5, safe_speed_limit_kmh * 0.2))
+        if current_speed_kmh >= safe_speed_limit_kmh - hold_margin_kmh:
             return 0, brake_level
         return self.resolve_exclusive_levels(traction_level, brake_level)
 

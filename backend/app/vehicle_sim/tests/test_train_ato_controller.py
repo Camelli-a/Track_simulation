@@ -506,6 +506,26 @@ def test_am_static_creep_uses_stronger_start_traction():
     assert output.commanded_brake_level == 0
 
 
+def test_am_station_relaunch_uses_stronger_start_traction():
+    controller = _controller()
+
+    output = controller.compute_am_command(
+        _am_input(
+            position_m=313.324,
+            speed_ms=0.0,
+            stop_target_m=1660.5,
+            ma_limit_m=48158.5,
+            allowed_speed_kmh=48.0,
+            previous_commanded_traction_level=1,
+        )
+    )
+
+    assert output.ato_state == "approaching"
+    assert output.ato_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_traction_level == controller.STATIC_CREEP_TRACTION_LEVEL
+    assert output.commanded_brake_level == 0
+
+
 def test_am_static_creep_continues_until_stop_window():
     controller = _controller()
 

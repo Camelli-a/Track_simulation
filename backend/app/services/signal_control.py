@@ -253,6 +253,8 @@ def _calculate_ma_limit(vehicle: DemoVehicle, vehicles: List[DemoVehicle]) -> di
 
 def _resolve_route_for_vehicle(vehicle: DemoVehicle) -> dict:
     configured_route = ROUTES.get(vehicle.route_id)
+    if vehicle.route_id == DEFAULT_ROUTE_ID:
+        return _dynamic_route(vehicle, configured_route or ROUTES[DEFAULT_ROUTE_ID])
     if configured_route is not None and _route_contains_position(configured_route, vehicle.position):
         return configured_route
     if configured_route is None:

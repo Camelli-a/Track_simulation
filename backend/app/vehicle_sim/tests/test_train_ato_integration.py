@@ -391,6 +391,24 @@ def test_stop_result_in_window_in_train_state():
     assert abs(result["error_cm"] - 30.0) < 1.0
 
 
+def test_am_relaunch_after_station_stop_on_uphill_grade():
+    manager = TrainManager()
+    train = manager.get_train("TRAIN-001")
+    train.state.position = 313.324
+    train.state.speed_ms = 0.0
+    train.driving_mode = "AM"
+    train.next_stop_target_m = 1660.5
+    _apply_valid_ma(train, ma_limit=48158.5, allowed_speed=48.0, distance=47845.2)
+
+    for _ in range(3):
+        train.step_tick(0.1)
+
+    assert train.track.get_gradient(313.324) > 30.0
+    assert train.commanded_traction_level >= 2
+    assert train.state.speed_ms > 0.0
+    assert train.state.position > 313.324
+
+
 def test_stop_result_is_not_generated_before_stop_window_overshoot():
     manager = TrainManager()
     train = manager.get_train("TRAIN-001")

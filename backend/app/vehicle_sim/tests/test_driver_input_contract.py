@@ -5,7 +5,7 @@ from app.data_flow.data_mapper import normalize_driver_input
 from app.data_flow.schemas import DriverInput as DriverInputSchema
 from app.vehicle_sim.adapters.driver_plc_mapping import decode_driver_control
 from app.vehicle_sim.message_router import MessageRouter
-from app.vehicle_sim.models import AtoCommand, DriverInput
+from app.vehicle_sim.models import AtoCommand, DriverInput, MaLimit
 from app.vehicle_sim.train_manager import TrainManager
 
 
@@ -27,6 +27,22 @@ def _manual(**overrides):
     }
     values.update(overrides)
     return DriverInput(**values)
+
+
+def _apply_valid_ma(train, ma_limit=500.0, allowed_speed=30.0):
+    train.apply_ma_state(
+        MaLimit(
+            vehicle_id=train.state.vehicle_id,
+            ma_limit=ma_limit,
+            target_speed=allowed_speed,
+            reason="test",
+            allowed_speed_kmh=allowed_speed,
+            eb_trigger_speed_kmh=allowed_speed + 8.0,
+            target_distance_m=max(0.0, ma_limit - train.state.position),
+            permission="allow",
+            signal_state="green",
+        )
+    )
 
 
 def test_driver_handle_uses_percent_as_canonical_control():
@@ -115,6 +131,47 @@ def test_plc_ato_fields_are_requests_and_readback_not_mode_authority():
     assert train.ato_start_requested is True
     assert train.ato_capable is True
     assert train.hardware_ato_active is True
+    assert train.driving_mode == "SM"
+    assert train.control_source == "manual"
+    assert train.ato_start_accepted is False
+    assert "ma_invalid" in train.ato_start_reject_reason
+
+
+def test_ato_start_button_enters_am_when_preconditions_are_ready():
+    train, _ = _train_and_router()
+    _apply_valid_ma(train)
+
+    train.step_manual(
+        _manual(
+            ato_start_btn=True,
+            ato_capable=True,
+            ato_active=False,
+            door_closed_light=True,
+            key_switch=True,
+            parking_release=True,
+        ),
+        0.1,
+    )
+
+    assert train.ato_start_requested is True
+    assert train.ato_start_accepted is True
+    assert train.ato_start_reject_reason is None
+    assert train.driving_mode == "AM"
+    assert train.control_source == "ato"
+
+
+def test_am_latches_until_explicit_mode_down_confirm():
+    train, _ = _train_and_router()
+    _apply_valid_ma(train)
+    train.step_manual(_manual(ato_start_btn=True), 0.1)
+
+    train.step_manual(_manual(ato_start_btn=False, control_mode="manual"), 0.1)
+
+    assert train.driving_mode == "AM"
+    assert train.control_source == "ato"
+
+    train.step_manual(_manual(mode_dn_confirm=True), 0.1)
+
     assert train.driving_mode == "SM"
     assert train.control_source == "manual"
 
