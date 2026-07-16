@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 FRAME_LEN   = 46
-FRAME_MAGIC = 0x55AA55AA  # 小端 DWORD，原始字节 AA 55 AA 55
+FRAME_MAGIC = 0xAA55AA55  # 小端 DWORD，原始字节 55 AA 55 AA（现场PLC实际使用）
 
 # 与 driver_desk_source.py 完全一致的 struct 格式
 FRAME_FMT = "<IHHHHHHHHHHBBHBBHHBBHHHHH"
